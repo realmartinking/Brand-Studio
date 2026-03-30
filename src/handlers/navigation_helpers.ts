@@ -1,6 +1,6 @@
 import { BotContext } from "../types";
 import { getActiveBrief } from "../db/briefs";
-import { startBriefingDialog } from "../briefing/dialog";
+import { startBriefingDialog as startDialog } from "../briefing/dialog";
 
 export async function startBriefingDialog(ctx: BotContext) {
   const projectId = ctx.session.active_project_id;
@@ -19,6 +19,6 @@ export async function startBriefingDialog(ctx: BotContext) {
     ctx.session.awaiting_input = "confirm_restart_brief";
   } else {
     ctx.session.awaiting_input = "briefing";
-    await startBriefingDialog(ctx);
+    await startDialog(ctx);
   }
 }

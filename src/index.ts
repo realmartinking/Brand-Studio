@@ -73,7 +73,7 @@ import {
   handleProjectSwitch,
   handleContinue,
 } from "./handlers/navigation";
-import { handleFigmaCommand, handleFigmaPageSelected, handleFigmaClear } from "./handlers/figma";
+import { handleFigmaCommand, handleFigmaPageSelected, handleFigmaClear, handleFigmaLoadMore, handleFigmaStyleGuide } from "./handlers/figma";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -292,6 +292,9 @@ bot.callbackQuery("deliver:back_to_module", handleBackToDeliverables);
 bot.callbackQuery(/^figma:page:(.+)$/, async (ctx) => {
   await handleFigmaPageSelected(ctx, ctx.match[1]);
 });
+
+bot.callbackQuery("figma:load_more", handleFigmaLoadMore);
+bot.callbackQuery("figma:style_guide", handleFigmaStyleGuide);
 
 // ── Text message router ───────────────────────────────────────────────────────
 

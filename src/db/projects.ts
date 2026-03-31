@@ -62,3 +62,18 @@ export async function updateProjectStatus(
     .set({ status, updatedAt: new Date() })
     .where(eq(projects.id, projectId));
 }
+
+export async function updateStyleGuide(projectId: string, styleGuide: string) {
+  await db
+    .update(projects)
+    .set({ styleGuide, updatedAt: new Date() })
+    .where(eq(projects.id, projectId));
+}
+
+export async function getStyleGuide(projectId: string): Promise<string | null> {
+  const project = await db.query.projects.findFirst({
+    where: eq(projects.id, projectId),
+    columns: { styleGuide: true },
+  });
+  return project?.styleGuide ?? null;
+}

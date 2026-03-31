@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { db } from "../db/index";
 import { moduleRuns } from "../db/schema";
+import { getStyleGuide } from "../db/projects";
 
 // ── Clients ──────────────────────────────────────────────────────────────────
 
@@ -205,6 +206,15 @@ async function generate(
   return result.text;
 }
 
+// ── Style Guide injector ──────────────────────────────────────────────────────
+
+async function withStyleGuide(systemPrompt: string, projectId?: string): Promise<string> {
+  if (!projectId) return systemPrompt;
+  const styleGuide = await getStyleGuide(projectId);
+  if (!styleGuide) return systemPrompt;
+  return `${systemPrompt}\n\n---\nSTYLE GUIDE СТУДИИ (обязательно учитывай при генерации):\n${styleGuide}`;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function generateWithClaude(
@@ -212,10 +222,11 @@ export async function generateWithClaude(
   userMessage: string,
   opts: GenerateOptions = {}
 ): Promise<string> {
+  const enrichedSystem = await withStyleGuide(systemPrompt, opts.projectId);
   return generate(
-    () => callClaude(systemPrompt, userMessage, opts.maxTokens),
-    () => callGPT(systemPrompt, userMessage, opts.maxTokens),
-    systemPrompt,
+    () => callClaude(enrichedSystem, userMessage, opts.maxTokens),
+    () => callGPT(enrichedSystem, userMessage, opts.maxTokens),
+    enrichedSystem,
     userMessage,
     opts
   );
@@ -226,10 +237,11 @@ export async function generateWithGPT(
   userMessage: string,
   opts: GenerateOptions = {}
 ): Promise<string> {
+  const enrichedSystem = await withStyleGuide(systemPrompt, opts.projectId);
   return generate(
-    () => callGPT(systemPrompt, userMessage, opts.maxTokens),
-    () => callClaude(systemPrompt, userMessage, opts.maxTokens),
-    systemPrompt,
+    () => callGPT(enrichedSystem, userMessage, opts.maxTokens),
+    () => callClaude(enrichedSystem, userMessage, opts.maxTokens),
+    enrichedSystem,
     userMessage,
     opts
   );

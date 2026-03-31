@@ -71,6 +71,7 @@ export const projects = pgTable("projects", {
   name: varchar("name", { length: 255 }).notNull(),
   status: projectStatusEnum("status").notNull().default("draft"),
   currentModule: integer("current_module").notNull().default(1),
+  styleGuide: text("style_guide"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

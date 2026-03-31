@@ -127,9 +127,10 @@ export const figmaReferences = pgTable("figma_references", {
   projectId: uuid("project_id")
     .notNull()
     .references(() => projects.id),
-  figmaFileKey: varchar("figma_file_key", { length: 255 }).notNull(),
+  figmaFileKey: varchar("figma_file_key", { length: 255 }).notNull().default(""),
   pageId: varchar("page_id", { length: 255 }).notNull(),
   pageName: varchar("page_name", { length: 255 }),
+  source: varchar("source", { length: 10 }).notNull().default("figma"),
   content: text("content").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

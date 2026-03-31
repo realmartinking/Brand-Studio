@@ -74,6 +74,7 @@ import {
   handleContinue,
 } from "./handlers/navigation";
 import { handleFigmaCommand, handleFigmaPageSelected, handleFigmaClear, handleFigmaLoadMore, handleFigmaStyleGuide } from "./handlers/figma";
+import { handleLearn, handleLearnMore, handleLearnDocument } from "./handlers/learn";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -130,6 +131,7 @@ bot.command("help", handleHelp);
 bot.command("continue", handleContinue);
 bot.command("figma", handleFigmaCommand);
 bot.command("figma_clear", handleFigmaClear);
+bot.command("learn", handleLearn);
 
 // ── Main menu ─────────────────────────────────────────────────────────────────
 
@@ -295,6 +297,15 @@ bot.callbackQuery(/^figma:page:(.+)$/, async (ctx) => {
 
 bot.callbackQuery("figma:load_more", handleFigmaLoadMore);
 bot.callbackQuery("figma:style_guide", handleFigmaStyleGuide);
+bot.callbackQuery("learn:more", handleLearnMore);
+
+// ── Document router (PDF uploads in learn mode) ───────────────────────────────
+
+bot.on("message:document", async (ctx) => {
+  if (ctx.session.awaiting_input === "learn") {
+    await handleLearnDocument(ctx);
+  }
+});
 
 // ── Text message router ───────────────────────────────────────────────────────
 

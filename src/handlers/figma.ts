@@ -5,7 +5,7 @@ import {
   getFilePages,
   getPageTextContent,
 } from "../integrations/figma";
-import { saveFigmaReference } from "../db/figmaRefs";
+import { saveFigmaReference, deleteFigmaReferences } from "../db/figmaRefs";
 
 // ── /figma [url] ──────────────────────────────────────────────────────────────
 
@@ -149,4 +149,18 @@ export async function handleFigmaPageSelected(
   }
 
   ctx.session.figma_file_key = null;
+}
+
+// ── /figma_clear ──────────────────────────────────────────────────────────────
+
+export async function handleFigmaClear(ctx: BotContext): Promise<void> {
+  const projectId = ctx.session.active_project_id;
+
+  if (!projectId) {
+    await ctx.reply("Нет активного проекта. Выбери проект через /projects.");
+    return;
+  }
+
+  const count = await deleteFigmaReferences(projectId);
+  await ctx.reply(`✅ Удалено ${count} референсов из проекта.`);
 }

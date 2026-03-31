@@ -1,4 +1,4 @@
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { db } from "./index";
 import { figmaReferences } from "./schema";
 
@@ -22,4 +22,12 @@ export async function getFigmaReferences(projectId: string) {
     .from(figmaReferences)
     .where(eq(figmaReferences.projectId, projectId))
     .orderBy(asc(figmaReferences.createdAt));
+}
+
+export async function deleteFigmaReferences(projectId: string): Promise<number> {
+  const result = await db
+    .delete(figmaReferences)
+    .where(eq(figmaReferences.projectId, projectId))
+    .returning({ id: figmaReferences.id });
+  return result.length;
 }

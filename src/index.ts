@@ -73,7 +73,7 @@ import {
   handleProjectSwitch,
   handleContinue,
 } from "./handlers/navigation";
-import { handleFigmaCommand, handleFigmaPageSelected } from "./handlers/figma";
+import { handleFigmaCommand, handleFigmaPageSelected, handleFigmaClear } from "./handlers/figma";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -129,6 +129,7 @@ bot.command("export", handleExport);
 bot.command("help", handleHelp);
 bot.command("continue", handleContinue);
 bot.command("figma", handleFigmaCommand);
+bot.command("figma_clear", handleFigmaClear);
 
 // ── Main menu ─────────────────────────────────────────────────────────────────
 

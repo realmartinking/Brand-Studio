@@ -76,6 +76,14 @@ import {
 } from "./handlers/navigation";
 import { handleFigmaCommand, handleFigmaPageSelected, handleFigmaClear, handleFigmaLoadMore, handleFigmaStyleGuide } from "./handlers/figma";
 import { handleLearn, handleLearnMore, handleLearnDocument } from "./handlers/learn";
+import {
+  handleProjectDocument,
+  handleDocUse,
+  handleDocSkip,
+  handleDocMore,
+  handleDocBriefSkip,
+  handleDocBriefContinue,
+} from "./handlers/pdfUpload";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -301,11 +309,21 @@ bot.callbackQuery("figma:load_more", handleFigmaLoadMore);
 bot.callbackQuery("figma:style_guide", handleFigmaStyleGuide);
 bot.callbackQuery("learn:more", handleLearnMore);
 
-// ── Document router (PDF uploads in learn mode) ───────────────────────────────
+// ── PDF document callbacks ────────────────────────────────────────────────────
+
+bot.callbackQuery("doc:use", handleDocUse);
+bot.callbackQuery("doc:skip", handleDocSkip);
+bot.callbackQuery("doc:more", handleDocMore);
+bot.callbackQuery("doc:brief_skip", handleDocBriefSkip);
+bot.callbackQuery("doc:brief_continue", handleDocBriefContinue);
+
+// ── Document router ───────────────────────────────────────────────────────────
 
 bot.on("message:document", async (ctx) => {
   if (ctx.session.awaiting_input === "learn") {
     await handleLearnDocument(ctx);
+  } else if (ctx.session.active_project_id) {
+    await handleProjectDocument(ctx);
   }
 });
 

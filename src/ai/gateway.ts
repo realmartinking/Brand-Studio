@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { db } from "../db/index";
 import { moduleRuns } from "../db/schema";
 import { getStyleGuide } from "../db/projects";
+import { getUploadedDocumentsContext } from "../db/briefs";
 
 // ── Clients ──────────────────────────────────────────────────────────────────
 
@@ -210,9 +211,20 @@ async function generate(
 
 async function withStyleGuide(systemPrompt: string, projectId?: string): Promise<string> {
   if (!projectId) return systemPrompt;
+
+  let result = systemPrompt;
+
   const styleGuide = await getStyleGuide(projectId);
-  if (!styleGuide) return systemPrompt;
-  return `${systemPrompt}\n\n---\nSTYLE GUIDE СТУДИИ (обязательно учитывай при генерации):\n${styleGuide}`;
+  if (styleGuide) {
+    result += `\n\n---\nSTYLE GUIDE СТУДИИ (обязательно учитывай при генерации):\n${styleGuide}`;
+  }
+
+  const uploadedDocs = await getUploadedDocumentsContext(projectId);
+  if (uploadedDocs) {
+    result += `\n\n---\nДОПОЛНИТЕЛЬНЫЕ МАТЕРИАЛЫ ИЗ ЗАГРУЖЕННЫХ ДОКУМЕНТОВ (используй как контекст):\n${uploadedDocs}`;
+  }
+
+  return result;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

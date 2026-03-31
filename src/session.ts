@@ -6,6 +6,8 @@ export interface SessionData {
   awaiting_input: string | null;
   figma_file_key: string | null;
   role: string | null;
+  pending_doc_analysis: string | null;
+  pending_doc_filename: string | null;
 }
 
 export function initialSession(): SessionData {
@@ -17,5 +19,7 @@ export function initialSession(): SessionData {
     awaiting_input: null,
     figma_file_key: null,
     role: null,
+    pending_doc_analysis: null,
+    pending_doc_filename: null,
   };
 }

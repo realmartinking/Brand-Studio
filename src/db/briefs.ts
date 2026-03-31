@@ -56,3 +56,40 @@ export async function completeBrief(projectId: string) {
     .set({ status: "complete" })
     .where(eq(briefs.id, brief.id));
 }
+
+export interface UploadedDocument {
+  filename: string;
+  analysis: string;
+  addedAt: string;
+}
+
+export async function appendUploadedDocument(
+  projectId: string,
+  doc: UploadedDocument
+) {
+  const brief = await getActiveBrief(projectId);
+  if (!brief) return;
+
+  const data = (brief.data as Record<string, unknown>) ?? {};
+  const existing = (data.uploaded_documents as UploadedDocument[]) ?? [];
+
+  await db
+    .update(briefs)
+    .set({ data: { ...data, uploaded_documents: [...existing, doc] } })
+    .where(eq(briefs.id, brief.id));
+}
+
+export async function getUploadedDocumentsContext(
+  projectId: string
+): Promise<string> {
+  const brief = await getActiveBrief(projectId);
+  if (!brief) return "";
+
+  const data = (brief.data as Record<string, unknown>) ?? {};
+  const docs = (data.uploaded_documents as UploadedDocument[]) ?? [];
+  if (docs.length === 0) return "";
+
+  return docs
+    .map((d, i) => `=== Загруженный документ ${i + 1}: ${d.filename} ===\n${d.analysis}`)
+    .join("\n\n");
+}

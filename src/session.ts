@@ -5,6 +5,7 @@ export interface SessionData {
   briefing_step: number | null;
   awaiting_input: string | null;
   figma_file_key: string | null;
+  role: string | null;
 }
 
 export function initialSession(): SessionData {
@@ -15,5 +16,6 @@ export function initialSession(): SessionData {
     briefing_step: null,
     awaiting_input: null,
     figma_file_key: null,
+    role: null,
   };
 }

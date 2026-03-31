@@ -3,22 +3,10 @@ import path from "path";
 import pdfParse from "pdf-parse";
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
-import { db } from "../db/index";
-import { users } from "../db/schema";
-import { eq } from "drizzle-orm";
+import { getUserRole, isPrivileged } from "../db/queries";
 import { saveFigmaReference, countFigmaReferences } from "../db/figmaRefs";
 
 const UPLOADS_DIR = path.resolve("uploads/learn");
-
-// ── Role guard ────────────────────────────────────────────────────────────────
-
-async function isManagerOrAdmin(telegramId: bigint): Promise<boolean> {
-  const user = await db.query.users.findFirst({
-    where: eq(users.telegramId, telegramId),
-    columns: { role: true },
-  });
-  return user?.role === "manager" || user?.role === "admin";
-}
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -37,7 +25,7 @@ function afterUploadKeyboard() {
 export async function handleLearn(ctx: BotContext): Promise<void> {
   const telegramId = BigInt(ctx.from!.id);
 
-  if (!(await isManagerOrAdmin(telegramId))) {
+  if (!isPrivileged(await getUserRole(telegramId))) {
     await ctx.reply("Команда доступна только менеджерам и администраторам.");
     return;
   }
@@ -70,7 +58,7 @@ export async function handleLearnMore(ctx: BotContext): Promise<void> {
 export async function handleLearnDocument(ctx: BotContext): Promise<void> {
   const telegramId = BigInt(ctx.from!.id);
 
-  if (!(await isManagerOrAdmin(telegramId))) {
+  if (!isPrivileged(await getUserRole(telegramId))) {
     await ctx.reply("Команда доступна только менеджерам и администраторам.");
     return;
   }

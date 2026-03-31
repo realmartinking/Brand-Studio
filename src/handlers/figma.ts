@@ -8,6 +8,7 @@ import {
 import { saveFigmaReference, getFigmaReferences, deleteFigmaReferences } from "../db/figmaRefs";
 import { updateStyleGuide } from "../db/projects";
 import { generateWithClaude } from "../ai/gateway";
+import { getUserRole, isPrivileged } from "../db/queries";
 
 const CHUNK_SIZE = 4000;
 const CHUNK_DELAY_MS = 300;
@@ -63,6 +64,11 @@ function afterExtractionKeyboard() {
 // ── /figma [url] ──────────────────────────────────────────────────────────────
 
 export async function handleFigmaCommand(ctx: BotContext): Promise<void> {
+  if (!isPrivileged(await getUserRole(BigInt(ctx.from!.id)))) {
+    await ctx.reply("Команда доступна только менеджерам и администраторам.");
+    return;
+  }
+
   const args = ctx.message?.text?.split(" ").slice(1).join(" ").trim();
   console.log(`[/figma] command received, args="${args}"`);
 
@@ -289,6 +295,11 @@ export async function handleFigmaStyleGuide(ctx: BotContext): Promise<void> {
 // ── /figma_clear ──────────────────────────────────────────────────────────────
 
 export async function handleFigmaClear(ctx: BotContext): Promise<void> {
+  if (!isPrivileged(await getUserRole(BigInt(ctx.from!.id)))) {
+    await ctx.reply("Команда доступна только менеджерам и администраторам.");
+    return;
+  }
+
   const projectId = ctx.session.active_project_id;
 
   if (!projectId) {

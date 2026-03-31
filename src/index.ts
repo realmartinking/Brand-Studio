@@ -7,6 +7,7 @@ import { redis } from "./redis";
 import { initialSession } from "./session";
 import { BotContext } from "./types";
 import { findOrCreateUser } from "./db/users";
+import { getUserRole } from "./db/queries";
 import { handleNewProject, handleProjectNameInput } from "./handlers/newProject";
 import { handleMyProjects, handleProjectSelected } from "./handlers/myProjects";
 import {
@@ -109,6 +110,7 @@ bot.command("start", async (ctx) => {
   ctx.session.active_project_id = null;
   ctx.session.briefing_step = null;
   ctx.session.module_state = null;
+  ctx.session.role = await getUserRole(telegramId);
 
   const keyboard = new InlineKeyboard()
     .text("🚀 Новый проект", "new_project")

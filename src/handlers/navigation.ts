@@ -164,8 +164,19 @@ export async function handleProjects(ctx: BotContext) {
 // ── /module [n] ───────────────────────────────────────────────────────────────
 
 export async function handleModule(ctx: BotContext) {
-  const arg = ctx.match as string | undefined;
-  const num = arg ? parseInt(arg.trim(), 10) : NaN;
+  const rawMatch = ctx.match;
+  let num: number;
+
+  if (typeof rawMatch === "string" && rawMatch) {
+    num = parseInt(rawMatch.trim(), 10);
+  } else {
+    num = NaN;
+  }
+
+  // Fallback: use session value when called programmatically (from callbacks/handleRestart)
+  if (isNaN(num) && ctx.session.current_module) {
+    num = ctx.session.current_module;
+  }
 
   if (isNaN(num) || num < 1 || num > 6) {
     await ctx.reply(
@@ -239,6 +250,7 @@ export async function handleRestart(ctx: BotContext) {
 
   ctx.session.awaiting_input = null;
   ctx.session.module_state = null;
+  ctx.session.current_module = project.currentModule;
 
   await ctx.reply(`🔄 Перезапускаю Модуль ${project.currentModule}...`);
   await handleModule(ctx);

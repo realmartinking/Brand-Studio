@@ -212,6 +212,7 @@ bot.callbackQuery("module:6:start", async (ctx) => {
 // Resume from /continue
 bot.callbackQuery(/^module_resume:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
+  ctx.session.current_module = parseInt(ctx.match[1], 10);
   await handleModule(ctx);
 });
 

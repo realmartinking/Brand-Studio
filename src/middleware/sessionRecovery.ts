@@ -22,7 +22,7 @@ export async function sessionRecovery(ctx: BotContext, next: NextFunction) {
   // After handler runs: persist active_project_id back to DB if it changed
   if (telegramId && ctx.session.active_project_id) {
     await updateUserActiveProject(telegramId, ctx.session.active_project_id).catch(
-      () => {} // Non-fatal — don't interrupt the request
+      (err) => console.error("[sessionRecovery] Failed to persist active_project_id:", err)
     );
   }
 }

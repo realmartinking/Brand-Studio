@@ -11,6 +11,7 @@ import { saveFigmaReference } from "../db/figmaRefs";
 
 export async function handleFigmaCommand(ctx: BotContext): Promise<void> {
   const args = ctx.message?.text?.split(" ").slice(1).join(" ").trim();
+  console.log(`[/figma] command received, args="${args}"`);
 
   if (!args) {
     await ctx.reply(
@@ -21,9 +22,11 @@ export async function handleFigmaCommand(ctx: BotContext): Promise<void> {
   }
 
   const fileKey = extractFileKeyFromUrl(args);
+  console.log(`[/figma] extracted fileKey="${fileKey}"`);
+
   if (!fileKey) {
     await ctx.reply(
-      "Не удалось извлечь ключ файла из ссылки. Убедись, что ссылка формата:\n`https://www.figma.com/design/КЛЮЧ/...`",
+      "Не удалось извлечь ключ файла из ссылки.\nУбедись, что ссылка формата:\n`https://www.figma.com/design/КЛЮЧ/...`",
       { parse_mode: "Markdown" }
     );
     return;
@@ -34,9 +37,13 @@ export async function handleFigmaCommand(ctx: BotContext): Promise<void> {
   let pages: Array<{ id: string; name: string }>;
   try {
     pages = await getFilePages(fileKey);
+    console.log(`[/figma] loaded ${pages.length} pages for fileKey="${fileKey}"`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`Ошибка при обращении к Figma API:\n${message}`);
+    console.error(`[/figma] getFilePages error:`, err);
+    await ctx.reply(`❌ Ошибка при обращении к Figma API:\n\`${message}\``, {
+      parse_mode: "Markdown",
+    });
     return;
   }
 
@@ -65,6 +72,7 @@ export async function handleFigmaPageSelected(
   pageId: string
 ): Promise<void> {
   await ctx.answerCallbackQuery();
+  console.log(`[figma:page] selected pageId="${pageId}"`);
 
   const fileKey = ctx.session.figma_file_key;
   if (!fileKey) {
@@ -80,21 +88,31 @@ export async function handleFigmaPageSelected(
     return;
   }
 
-  // Get page name from callback message text (best-effort)
-  const buttonText =
-    ctx.callbackQuery?.message?.reply_markup?.inline_keyboard
-      ?.flat()
-      .find((btn) => "callback_data" in btn && btn.callback_data === `figma:page:${pageId}`)
-      ?.text ?? pageId;
+  console.log(`[figma:page] fileKey="${fileKey}", projectId="${projectId}"`);
 
-  await ctx.reply(`⏳ Извлекаю текст со страницы «${buttonText}»...`);
+  // Re-fetch pages to get the name for this pageId reliably
+  let pageName = pageId;
+  try {
+    const pages = await getFilePages(fileKey);
+    pageName = pages.find((p) => p.id === pageId)?.name ?? pageId;
+  } catch {
+    // non-critical — continue without name
+    console.warn(`[figma:page] could not re-fetch pages for name lookup`);
+  }
+
+  console.log(`[figma:page] pageName="${pageName}"`);
+  await ctx.reply(`⏳ Извлекаю текст со страницы «${pageName}»...`);
 
   let texts: string[];
   try {
     texts = await getPageTextContent(fileKey, pageId);
+    console.log(`[figma:page] extracted ${texts.length} text items`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await ctx.reply(`Ошибка при чтении страницы:\n${message}`);
+    console.error(`[figma:page] getPageTextContent error:`, err);
+    await ctx.reply(`❌ Ошибка при чтении страницы:\n\`${message}\``, {
+      parse_mode: "Markdown",
+    });
     return;
   }
 
@@ -104,26 +122,28 @@ export async function handleFigmaPageSelected(
   }
 
   const content = texts.join("\n\n");
-  const preview = content.length > 1500 ? content.slice(0, 1500) + "\n…(обрезано)" : content;
+  const preview =
+    content.length > 1500 ? content.slice(0, 1500) + "\n…(обрезано)" : content;
 
-  await ctx.reply(
-    `📄 *Текст страницы «${buttonText}»:*\n\n${preview}`,
-    { parse_mode: "Markdown" }
-  );
+  await ctx.reply(`📄 *Текст страницы «${pageName}»:*\n\n${preview}`, {
+    parse_mode: "Markdown",
+  });
 
   try {
     await saveFigmaReference({
       projectId,
       figmaFileKey: fileKey,
       pageId,
-      pageName: buttonText,
+      pageName,
       content,
     });
-    await ctx.reply(`✅ Референс сохранён в проект (страница «${buttonText}»).`);
+    console.log(`[figma:page] reference saved to DB`);
+    await ctx.reply(`✅ Референс сохранён в проект (страница «${pageName}»).`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error(`[figma:page] saveFigmaReference error:`, err);
     await ctx.reply(
-      `⚠️ Текст показан, но сохранить в БД не удалось: ${message}\nВозможно, нужно запустить \`npm run db:push\` для применения миграции.`,
+      `⚠️ Текст показан, но сохранить в БД не удалось:\n\`${message}\`\n\nВозможно, нужно применить миграцию: \`npm run db:push\``,
       { parse_mode: "Markdown" }
     );
   }

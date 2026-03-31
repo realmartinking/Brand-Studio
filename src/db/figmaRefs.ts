@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, asc } from "drizzle-orm";
 import { db } from "./index";
 import { figmaReferences } from "./schema";
 
@@ -21,5 +21,5 @@ export async function getFigmaReferences(projectId: string) {
     .select()
     .from(figmaReferences)
     .where(eq(figmaReferences.projectId, projectId))
-    .orderBy(figmaReferences.createdAt);
+    .orderBy(asc(figmaReferences.createdAt));
 }

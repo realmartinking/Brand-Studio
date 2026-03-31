@@ -121,6 +121,18 @@ export const artifacts = pgTable("artifacts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const figmaReferences = pgTable("figma_references", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id),
+  figmaFileKey: varchar("figma_file_key", { length: 255 }).notNull(),
+  pageId: varchar("page_id", { length: 255 }).notNull(),
+  pageName: varchar("page_name", { length: 255 }),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   projects: many(projects),

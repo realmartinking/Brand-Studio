@@ -73,6 +73,7 @@ import {
   handleProjectSwitch,
   handleContinue,
 } from "./handlers/navigation";
+import { handleFigmaCommand, handleFigmaPageSelected } from "./handlers/figma";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -127,6 +128,7 @@ bot.command("restart", handleRestart);
 bot.command("export", handleExport);
 bot.command("help", handleHelp);
 bot.command("continue", handleContinue);
+bot.command("figma", handleFigmaCommand);
 
 // ── Main menu ─────────────────────────────────────────────────────────────────
 
@@ -282,6 +284,12 @@ bot.callbackQuery("deliver:full_report", handleFullReport);
 bot.callbackQuery("deliver:summary", handleSummary);
 bot.callbackQuery("deliver:download_again", handleDownloadAgain);
 bot.callbackQuery("deliver:back_to_module", handleBackToDeliverables);
+
+// ── Figma ─────────────────────────────────────────────────────────────────────
+
+bot.callbackQuery(/^figma:page:(.+)$/, async (ctx) => {
+  await handleFigmaPageSelected(ctx, ctx.match[1]);
+});
 
 // ── Text message router ───────────────────────────────────────────────────────
 

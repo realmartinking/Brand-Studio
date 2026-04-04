@@ -1,4 +1,4 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, asc, and } from "drizzle-orm";
 import { db } from "./index";
 import { artifacts } from "./schema";
 
@@ -49,6 +49,24 @@ export async function getLatestArtifact(projectId: string, type: ArtifactType) {
   return db.query.artifacts.findFirst({
     where: and(eq(artifacts.projectId, projectId), eq(artifacts.type, type)),
     orderBy: [desc(artifacts.version)],
+  });
+}
+
+export async function getApprovedArtifact(projectId: string, type: ArtifactType) {
+  return db.query.artifacts.findFirst({
+    where: and(
+      eq(artifacts.projectId, projectId),
+      eq(artifacts.type, type),
+      eq(artifacts.status, "approved")
+    ),
+    orderBy: [desc(artifacts.version)],
+  });
+}
+
+export async function getAllArtifactsOfType(projectId: string, type: ArtifactType) {
+  return db.query.artifacts.findMany({
+    where: and(eq(artifacts.projectId, projectId), eq(artifacts.type, type)),
+    orderBy: [asc(artifacts.version)],
   });
 }
 

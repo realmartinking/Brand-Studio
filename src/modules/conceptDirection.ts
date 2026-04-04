@@ -1,18 +1,22 @@
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
-import { generateWithClaude } from "../ai/gateway";
+import { generateWithClaude, REVISION_SYSTEM_PREFIX } from "../ai/gateway";
 import { getActiveBrief } from "../db/briefs";
-import { saveArtifact, getLatestArtifact, approveArtifact } from "../db/artifacts";
+import { saveArtifact, getLatestArtifact, getApprovedArtifact, approveArtifact } from "../db/artifacts";
 import { getLatestModuleRun } from "../db/moduleRuns";
 import { updateCurrentModule } from "../db/projects";
 import { sendLongMessage } from "../utils/telegram";
 import { sendNextStep } from "../utils/nextStep";
+import { getStyleGuide } from "../prompts/styleGuide";
 
 const MODULE_NUM = 4;
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `Ты — креативный директор брендинговой студии.
+
+ВАЖНО: Тебе предоставлены утверждённые результаты предыдущих этапов (Brand DNA, нейминг, вербальная система). НЕ пересоздавай их. Используй КАК ЕСТЬ как основу.
+
 На основе стратегической платформы, нейминга и вербальной системы
 предложи 3–5 концептуальных направлений развития бренда.
 
@@ -35,8 +39,12 @@ const SYSTEM_PROMPT = `Ты — креативный директор бренд
 
 async function buildInput(projectId: string): Promise<string> {
   const brief = await getActiveBrief(projectId);
-  const dna = await getLatestArtifact(projectId, "brand_dna");
-  const verbal = await getLatestArtifact(projectId, "verbal_system");
+  const dna =
+    (await getApprovedArtifact(projectId, "brand_dna")) ??
+    (await getLatestArtifact(projectId, "brand_dna"));
+  const verbal =
+    (await getApprovedArtifact(projectId, "verbal_system")) ??
+    (await getLatestArtifact(projectId, "verbal_system"));
 
   const briefText = brief?.summary ?? "Бриф не найден";
   const dnaText = (dna?.data as Record<string, string> | null)?.text ?? "Brand DNA не найдена";
@@ -70,7 +78,10 @@ function conceptsKeyboard() {
     .text("⭐ Выбрать концепцию", "concept:select")
     .row()
     .text("🔄 Другие направления", "concept:more")
-    .text("✏️ Доработать", "concept:revise");
+    .text("✏️ Доработать", "concept:revise")
+    .row()
+    .text("↩️ К неймингу", "goto:3")
+    .text("📊 Статус", "nav:status");
 }
 
 function selectedConceptKeyboard(artifactId: string) {
@@ -78,7 +89,8 @@ function selectedConceptKeyboard(artifactId: string) {
     .text("✅ Одобрить", `concept:approve:${artifactId}`)
     .text("✏️ Доработать", `concept:revise_selected:${artifactId}`)
     .row()
-    .text("↩️ Назад к концепциям", "concept:back");
+    .text("↩️ Назад к концепциям", "concept:back")
+    .text("📊 Статус", "nav:status");
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -98,9 +110,10 @@ async function sendConcepts(ctx: BotContext, conceptsText: string) {
 
 async function generate(
   projectId: string,
-  userMessage: string
+  userMessage: string,
+  systemPrefix = ""
 ): Promise<{ text: string; artifactId: string }> {
-  const text = await generateWithClaude(SYSTEM_PROMPT, userMessage, {
+  const text = await generateWithClaude(systemPrefix + SYSTEM_PROMPT + "\n\n" + await getStyleGuide(), userMessage, {
     projectId,
     moduleNum: MODULE_NUM,
     maxTokens: 4000,
@@ -132,12 +145,14 @@ export async function runConceptDirection(ctx: BotContext) {
   try {
     await ctx.reply("🎨 Запускаю модуль Concept Direction... Разрабатываю концепции...");
     await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+    await ctx.reply("💭 Думаю...");
 
     const input = await buildInput(projectId);
     console.log("[CONCEPT] buildInput OK, generating...");
     const { text, artifactId } = await generate(projectId, input);
     console.log("[CONCEPT] generate OK, artifactId:", artifactId);
 
+    await updateCurrentModule(projectId, MODULE_NUM);
     ctx.session.current_module = MODULE_NUM;
     ctx.session.module_state = artifactId;
     ctx.session.awaiting_input = null;
@@ -161,6 +176,7 @@ export async function handleConceptMore(ctx: BotContext) {
   try {
     await ctx.reply("🔄 Генерирую новые концепции...");
     await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+    await ctx.reply("💭 Думаю...");
 
     const input = await buildInput(projectId);
     const existing = await getLatestArtifact(projectId, "concept_direction");
@@ -198,6 +214,7 @@ export async function handleConceptRevisionInput(ctx: BotContext, comment: strin
 
   try {
     await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+    await ctx.reply("💭 Думаю...");
 
     const input = await buildInput(projectId);
     const existing = await getLatestArtifact(projectId, "concept_direction");
@@ -205,7 +222,8 @@ export async function handleConceptRevisionInput(ctx: BotContext, comment: strin
 
     const { text, artifactId } = await generate(
       projectId,
-      `${input}\n\nПредыдущие концепции:\n${prevConcepts}\n\nКомментарий:\n${comment}\n\nПерегенерируй с учётом комментария.`
+      `Текущий результат:\n${prevConcepts}\n\nКомментарий клиента:\n${comment}\n\nОбнови концепции с учётом комментария. Сохрани всё что не было критиковано.`,
+      REVISION_SYSTEM_PREFIX
     );
     console.log("[CONCEPT] handleConceptRevisionInput generated, artifactId:", artifactId);
 
@@ -233,22 +251,43 @@ export async function handleConceptSelect(ctx: BotContext) {
 
 export async function handleConceptSelectInput(ctx: BotContext, selection: string) {
   console.log("[CONCEPT] handleConceptSelectInput called, selection:", selection);
+  ctx.session.pending_selection = selection;
+  ctx.session.awaiting_input = null;
+
+  const kb = new InlineKeyboard()
+    .text("✅ Подтвердить", "concept_proceed")
+    .text("↩️ Вернуться к концепциям", "concept:back");
+
+  await ctx.reply(
+    `Отличный выбор! Подтверждаем концепцию *«${selection}»*?`,
+    { parse_mode: "Markdown", reply_markup: kb }
+  );
+}
+
+export async function handleConceptProceed(ctx: BotContext) {
+  await ctx.answerCallbackQuery();
   const projectId = ctx.session.active_project_id;
-  if (!projectId) {
-    console.error("[CONCEPT ERROR] handleConceptSelectInput: no projectId in session");
+  if (!projectId) return;
+
+  const selection = ctx.session.pending_selection;
+  if (!selection) {
+    await ctx.reply(
+      "Концепция не выбрана. Нажмите «⭐ Выбрать концепцию» и укажите номер.",
+      { reply_markup: conceptsKeyboard() }
+    );
     return;
   }
+  ctx.session.pending_selection = null;
+
+  console.log("[CONCEPT] handleConceptProceed: selection:", selection);
 
   try {
-    ctx.session.awaiting_input = null;
-
     const existing = await getLatestArtifact(projectId, "concept_direction");
     console.log("[CONCEPT] existing artifact:", existing?.id, "stage:", (existing?.data as Record<string, string> | null)?.stage);
 
     const allConcepts = (existing?.data as Record<string, string> | null)?.concepts ?? "";
     console.log("[CONCEPT] allConcepts length:", allConcepts.length);
 
-    // Parse the concept number from user input
     const concepts = parseConcepts(allConcepts);
     console.log("[CONCEPT] parsed concepts count:", concepts.length);
 
@@ -284,15 +323,13 @@ export async function handleConceptSelectInput(ctx: BotContext, selection: strin
 
     ctx.session.module_state = artifact.id;
 
-    // Send selected concept via sendLongMessage (respects 4096-char Telegram limit)
     await sendLongMessage(ctx, `Выбрана концепция:\n\n${selectedText}`, { parse_mode: undefined });
-    // Send keyboard as a separate short message
     await ctx.reply("Что делаем с концепцией?", {
       reply_markup: selectedConceptKeyboard(artifact.id),
     });
-    console.log("[CONCEPT] handleConceptSelectInput: reply sent with keyboard");
+    console.log("[CONCEPT] handleConceptProceed: reply sent with keyboard");
   } catch (error) {
-    console.error("[CONCEPT ERROR] handleConceptSelectInput:", error);
+    console.error("[CONCEPT ERROR] handleConceptProceed:", error);
     throw error;
   }
 }
@@ -313,7 +350,8 @@ export async function handleConceptApprove(ctx: BotContext, artifactId: string) 
     ctx.session.current_module = 5;
     ctx.session.module_state = null;
 
-    await sendNextStep(ctx, projectId, "✅ Концептуальное направление одобрено!");
+    const { showOrRunModule } = await import("./moduleNav");
+    await showOrRunModule(ctx, 5);
     console.log("[CONCEPT] handleConceptApprove: approved, moved to module 5");
   } catch (error) {
     console.error("[CONCEPT ERROR] handleConceptApprove:", error);
@@ -341,6 +379,7 @@ export async function handleConceptSelectedRevisionInput(
 
   try {
     await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+    await ctx.reply("💭 Думаю...");
 
     const existing = await getLatestArtifact(projectId, "concept_direction");
     const data = (existing?.data as Record<string, string>) ?? {};
@@ -350,8 +389,8 @@ export async function handleConceptSelectedRevisionInput(
     const input = await buildInput(projectId);
 
     const revisedText = await generateWithClaude(
-      SYSTEM_PROMPT,
-      `${input}\n\nВыбранная концепция для доработки:\n${prevConcept}\n\nКомментарий:\n${comment}\n\nПерегенерируй ТОЛЬКО эту концепцию с учётом комментария, сохрани формат.`,
+      REVISION_SYSTEM_PREFIX + SYSTEM_PROMPT + "\n\n" + await getStyleGuide(),
+      `Текущий результат:\n${prevConcept}\n\nКомментарий клиента:\n${comment}\n\nОбнови концепцию с учётом комментария. Сохрани всё что не было критиковано.`,
       { projectId, moduleNum: MODULE_NUM, maxTokens: 2000 }
     );
     console.log("[CONCEPT] revisedText length:", revisedText.length);

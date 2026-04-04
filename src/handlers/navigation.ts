@@ -15,9 +15,8 @@ import {
 // ── Persistent keyboard ───────────────────────────────────────────────────────
 
 export const MAIN_KEYBOARD = new Keyboard()
-  .text("📊 Статус")
-  .text("📂 Проекты")
-  .text("❓ Помощь")
+  .text("🚀 Новый проект").text("📂 Проекты").row()
+  .text("📊 Статус").text("❓ Помощь")
   .resized()
   .persistent();
 
@@ -59,12 +58,12 @@ async function getModuleStatuses(
     },
     {
       num: 2,
-      label: "Brand DNA",
+      label: "Стратегия бренда",
       status: isDone(dna?.status === "approved", 2),
     },
     {
       num: 3,
-      label: "Нейминг & Verbal",
+      label: "Нейминг",
       status: isDone(verbal?.status === "approved", 3),
     },
     {
@@ -74,12 +73,12 @@ async function getModuleStatuses(
     },
     {
       num: 5,
-      label: "Visual Identity",
+      label: "Визуальный стиль",
       status: isDone(visual?.status === "approved", 5),
     },
     {
       num: 6,
-      label: "Упаковка",
+      label: "Финальный документ",
       status: isDone(deliverable?.status === "approved", 6),
     },
   ];
@@ -359,11 +358,11 @@ export async function handleContinue(ctx: BotContext) {
 
   const MODULE_NAMES: Record<number, string> = {
     1: "Бриф",
-    2: "Brand DNA",
-    3: "Нейминг & Verbal",
-    4: "Concept Direction",
-    5: "Visual Identity",
-    6: "Deliverables",
+    2: "Стратегия бренда",
+    3: "Нейминг",
+    4: "Концепции",
+    5: "Визуальный стиль",
+    6: "Финальный документ",
   };
 
   const statusLabel = STATUS_LABELS[project.status] ?? project.status;

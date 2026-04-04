@@ -9,16 +9,17 @@ import { getLatestArtifact } from "../db/artifacts";
 export interface ModuleInfo {
   num: number;
   name: string;
+  emoji: string;
   startCallback: string;
 }
 
 export const MODULES: Record<number, ModuleInfo> = {
-  1: { num: 1, name: "Бриф",               startCallback: "module:1:start" },
-  2: { num: 2, name: "Brand DNA",           startCallback: "module:2:start" },
-  3: { num: 3, name: "Нейминг & Verbal",    startCallback: "module:3:start" },
-  4: { num: 4, name: "Concept Direction",   startCallback: "module:4:start" },
-  5: { num: 5, name: "Visual Identity",     startCallback: "module:5:start" },
-  6: { num: 6, name: "Brand Book",          startCallback: "module:6:start" },
+  1: { num: 1, name: "Бриф",              emoji: "📋", startCallback: "module:1:start" },
+  2: { num: 2, name: "Стратегия бренда",  emoji: "🧬", startCallback: "module:2:start" },
+  3: { num: 3, name: "Нейминг",           emoji: "🏷", startCallback: "module:3:start" },
+  4: { num: 4, name: "Концепции",         emoji: "🎨", startCallback: "module:4:start" },
+  5: { num: 5, name: "Визуальный стиль",  emoji: "🖼", startCallback: "module:5:start" },
+  6: { num: 6, name: "Финальный документ",emoji: "📦", startCallback: "module:6:start" },
 };
 
 // ── Project state ─────────────────────────────────────────────────────────────
@@ -53,9 +54,16 @@ export async function getProjectState(projectId: string): Promise<ProjectState |
   ].filter((n): n is number => !!n);
 
   const isCompleted = done.includes(6);
-  const nextModule = isCompleted
+  const artifactBasedNext = isCompleted
     ? null
     : ([1, 2, 3, 4, 5, 6].find((n) => !done.includes(n)) ?? null);
+  // project.currentModule is the authoritative pointer set on every module start/approve.
+  // If it's ahead of what artifacts say, trust the DB value.
+  const nextModule = isCompleted
+    ? null
+    : project.currentModule > (artifactBasedNext ?? 0)
+      ? project.currentModule
+      : artifactBasedNext;
 
   return {
     projectId,
@@ -77,7 +85,7 @@ export function nextStepKeyboard(state: ProjectState): InlineKeyboard {
     kb.text("🚀 Новый проект", "new_project");
   } else if (state.nextModule) {
     const mod = MODULES[state.nextModule];
-    kb.text(`▶️ Запустить ${mod.name}`, mod.startCallback).row();
+    kb.text(`▶️ ${mod.emoji} ${mod.name}`, mod.startCallback).row();
     kb.text("📊 Статус", "nav:status").text("↩️ К проектам", "my_projects");
   }
 
@@ -92,7 +100,7 @@ export function continueKeyboard(state: ProjectState): InlineKeyboard {
     kb.text("🚀 Новый проект", "new_project");
   } else if (state.nextModule) {
     const mod = MODULES[state.nextModule];
-    kb.text(`▶️ Продолжить — ${mod.name}`, mod.startCallback).row();
+    kb.text(`▶️ Продолжить — ${mod.emoji} ${mod.name}`, mod.startCallback).row();
     kb.text("📊 Статус", "nav:status");
   }
 
@@ -106,7 +114,7 @@ export function progressSummary(state: ProjectState): string {
     const done = state.completedModules.includes(m.num);
     const active = !done && m.num === state.nextModule;
     const icon = done ? "✅" : active ? "⏳" : "⬜";
-    return `${icon} М${m.num}: ${m.name}`;
+    return `${icon} ${m.emoji} ${m.name}`;
   });
   return lines.join("\n");
 }

@@ -1,39 +1,53 @@
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
-import { generateWithClaude } from "../ai/gateway";
+import { generateWithClaude, REVISION_SYSTEM_PREFIX } from "../ai/gateway";
 import { getActiveBrief } from "../db/briefs";
-import { saveArtifact, getLatestArtifact, approveArtifact } from "../db/artifacts";
+import { saveArtifact, getLatestArtifact, getApprovedArtifact, getAllArtifactsOfType, approveArtifact } from "../db/artifacts";
 import { getLatestModuleRun } from "../db/moduleRuns";
 import { updateCurrentModule } from "../db/projects";
 import { sendLongMessage } from "../utils/telegram";
 import { sendNextStep } from "../utils/nextStep";
+import { getStyleGuide } from "../prompts/styleGuide";
+import { getNamingSkill } from "../prompts/namingSkill";
 
 const MODULE_NUM = 3;
 
 // ── System prompts ────────────────────────────────────────────────────────────
 
-const NAMING_SYSTEM_PROMPT = `Ты — эксперт по неймингу брендов.
-На основе брифа и стратегической платформы бренда предложи названия.
+const NAMING_SYSTEM_PROMPT = `Ты — нейминг-стратег уровня топовых креативных агентств (SmartHeart, Shuka, Suprematika).
 
-Создай 3–4 naming territory (направления нейминга).
-В каждом направлении — 3–4 варианта названий.
+ВАЖНО: Тебе предоставлена утверждённая бренд-платформа (Brand DNA). НЕ пересоздавай её, НЕ комментируй её. Используй КАК ЕСТЬ как основу для нейминга.
 
-Для каждого названия укажи:
-- Само название
-- Тип (описательное / метафора / неологизм / аббревиатура / имя)
-- Логика: почему это название работает для этого бренда
-- Язык: на каком языке основано
+Твоя задача — создать названия, которые РАСКРЫВАЮТ БРЕНД через коммуникацию. Следуй методологии из <naming_methodology> максимально строго.
+
+КЛЮЧЕВОЙ ПРИНЦИП: Лучший нейм — это слово, которое работает на нескольких смысловых уровнях и естественно встраивается в живую речь. НЕ предлагай прямолинейные составные слова (типа BrandMaker, SmartBuild). НЕ предлагай клише категории.
+
+Создай 3–4 naming territory (направления).
+В каждом направлении — 2–3 варианта названий.
+
+Для КАЖДОГО названия обязательно:
+- Название (в нужном написании)
+- Фонетика — как произносится
+- Семантика — откуда слово, корни, значения
+- Почему работает — 1-2 предложения, как раскрывает суть бренда
+- Коммуникации — 2-3 фразы/слогана где нейм играет
+- Тест переписки — как звучит в SMS между друзьями (формат диалога)
 
 Формат:
 
 🏷 НАПРАВЛЕНИЕ 1: [название территории]
-[описание логики направления]
+[логика направления — 1 предложение]
 
-  1. **[Название]** — [тип]
-     💡 [логика]
-
-  2. **[Название]** — [тип]
-     💡 [логика]
+**[НАЗВАНИЕ]**
+📖 Фонетика: [как читается]
+🔍 Семантика: [происхождение, корни]
+💡 Почему работает: [связь с брендом]
+💬 Коммуникации:
+— [фраза 1]
+— [фраза 2]
+📱 В переписке:
+— [реплика друга]
+— [ответ]
 
 🏷 НАПРАВЛЕНИЕ 2: ...`;
 
@@ -64,16 +78,81 @@ const VERBAL_SYSTEM_PROMPT = `Ты — эксперт по вербальным 
 Email-рассылка:
 [текст]`;
 
+// ── Name extraction helper ────────────────────────────────────────────────────
+
+/**
+ * Strips common selection-intent prefixes so "Выбираю Kortex" → "Kortex".
+ */
+export function extractCleanName(text: string): string {
+  const cleaned = text
+    .replace(
+      /^(выбираю|выбираем|хочу назвать|хочу|мне нравится|нравится|берём|возьмём|остановлюсь на|мой выбор|итого|финально|назовём|назвать|буду использовать|предлагаю|что если назвать|а что если|поставим|поставлю)\s+/i,
+      ""
+    )
+    .replace(/^(choosing|i choose|let's go with|i like|how about)\s+/i, "")
+    .replace(/^[«"']|[»"']$/g, "")
+    .trim();
+  return cleaned || text;
+}
+
+// ── Naming history helpers ────────────────────────────────────────────────────
+
+function extractNamesFromText(text: string): string[] {
+  const names: string[] = [];
+  const regex = /\*\*([^*]+)\*\*/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const name = match[1].trim();
+    if (
+      name.length >= 2 &&
+      name.length <= 40 &&
+      !name.startsWith("НАПРАВЛЕНИЕ") &&
+      !name.startsWith("Направление") &&
+      !name.includes("ДЕСКРИПТОР") &&
+      !name.includes("СЛОГАН")
+    ) {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+async function getAllPreviousNames(projectId: string): Promise<string[]> {
+  const allArtifacts = await getAllArtifactsOfType(projectId, "verbal_system");
+  const allNames: string[] = [];
+  for (const artifact of allArtifacts) {
+    const data = artifact.data as Record<string, string> | null;
+    const naming = data?.naming ?? "";
+    if (naming) allNames.push(...extractNamesFromText(naming));
+  }
+  return [...new Set(allNames)];
+}
+
+function buildNamingSystemPrompt(previousNames: string[]): string {
+  let prompt = NAMING_SYSTEM_PROMPT;
+  if (previousNames.length > 0) {
+    prompt += `\n\n---\nКРИТИЧЕСКОЕ ПРАВИЛО — ЗАПРЕТ ПОВТОРОВ:\nЭти названия УЖЕ были предложены. НЕ ПОВТОРЯЙ ни одно из них и их производные:\n`;
+    prompt += previousNames.join(", ");
+    prompt += `\nПредложи ПОЛНОСТЬЮ НОВЫЕ варианты. Смени типологию, язык, ассоциативный подход.`;
+  }
+  return prompt;
+}
+
 // ── Context helpers ───────────────────────────────────────────────────────────
 
 async function buildNamingInput(projectId: string): Promise<string> {
   const brief = await getActiveBrief(projectId);
-  const dnaArtifact = await getLatestArtifact(projectId, "brand_dna");
+  const dnaArtifact =
+    (await getApprovedArtifact(projectId, "brand_dna")) ??
+    (await getLatestArtifact(projectId, "brand_dna"));
 
   const briefText = brief?.summary ?? "Бриф не найден";
   const dnaText = (dnaArtifact?.data as Record<string, string> | null)?.text ?? "Brand DNA не найдена";
 
-  return `БРИФ ПРОЕКТА:\n${briefText}\n\nBRAND DNA:\n${dnaText}`;
+  console.log("[naming] Brand DNA found:", dnaText.substring(0, 100));
+  console.log("[naming] Brief found:", briefText.substring(0, 100));
+
+  return `БРИФ ПРОЕКТА:\n${briefText}\n\n---\nУТВЕРЖДЁННАЯ BRAND DNA (не пересоздавать, использовать как основу):\n${dnaText}`;
 }
 
 async function buildVerbalInput(
@@ -98,8 +177,17 @@ function namingKeyboard() {
   return new InlineKeyboard()
     .text("⭐ Выбрать направление", "naming:select")
     .row()
-    .text("🔄 Сгенерировать ещё", "naming:more")
-    .text("✏️ Доработать", "naming:revise");
+    .text("🔄 Ещё варианты", "naming:more")
+    .text("✏️ Доработать", "naming:revise")
+    .row()
+    .text("↩️ К стратегии", "goto:2")
+    .text("📊 Статус", "nav:status");
+}
+
+export async function handleNamingBackToDna(ctx: BotContext) {
+  await ctx.answerCallbackQuery();
+  const { showOrRunModule } = await import("./moduleNav");
+  await showOrRunModule(ctx, 2);
 }
 
 function verbalKeyboard(artifactId: string) {
@@ -118,13 +206,17 @@ export async function runNaming(ctx: BotContext) {
 
   await ctx.reply("🏷 Запускаю модуль Naming... Генерирую варианты названий...");
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
+  const previousNames = await getAllPreviousNames(projectId);
   const input = await buildNamingInput(projectId);
-  const namingText = await generateWithClaude(NAMING_SYSTEM_PROMPT, input, {
-    projectId,
-    moduleNum: MODULE_NUM,
-    maxTokens: 3000,
-  });
+  const namingText = await generateWithClaude(
+    buildNamingSystemPrompt(previousNames) +
+    `\n\n<naming_methodology>\n${getNamingSkill()}\n</naming_methodology>` +
+    "\n\n" + await getStyleGuide(),
+    input,
+    { projectId, moduleNum: MODULE_NUM, maxTokens: 3000 }
+  );
 
   const run = await getLatestModuleRun(projectId, MODULE_NUM);
   if (!run) throw new Error("Module run not saved");
@@ -139,6 +231,7 @@ export async function runNaming(ctx: BotContext) {
     version: existing ? existing.version + 1 : 1,
   });
 
+  await updateCurrentModule(projectId, MODULE_NUM);
   ctx.session.current_module = MODULE_NUM;
   ctx.session.module_state = artifact.id;
   ctx.session.awaiting_input = null;
@@ -154,16 +247,20 @@ export async function handleNamingMore(ctx: BotContext) {
 
   await ctx.reply("🔄 Генерирую новые варианты...");
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
+  const previousNames = await getAllPreviousNames(projectId);
   const input = await buildNamingInput(projectId);
-  const existing = await getLatestArtifact(projectId, "verbal_system");
-  const prevNaming = (existing?.data as Record<string, string> | null)?.naming ?? "";
 
   const namingText = await generateWithClaude(
-    NAMING_SYSTEM_PROMPT,
-    `${input}\n\nПредыдущие варианты (не повторяй их):\n${prevNaming}`,
+    buildNamingSystemPrompt(previousNames) +
+    `\n\n<naming_methodology>\n${getNamingSkill()}\n</naming_methodology>` +
+    "\n\n" + await getStyleGuide(),
+    input,
     { projectId, moduleNum: MODULE_NUM, maxTokens: 3000 }
   );
+
+  const existing = await getLatestArtifact(projectId, "verbal_system");
 
   const run = await getLatestModuleRun(projectId, MODULE_NUM);
   if (!run) throw new Error("Module run not saved");
@@ -196,14 +293,20 @@ export async function handleNamingRevisionInput(ctx: BotContext, comment: string
   if (!projectId) return;
 
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
-  const input = await buildNamingInput(projectId);
-  const existing = await getLatestArtifact(projectId, "verbal_system");
+  const [previousNames, existing] = await Promise.all([
+    getAllPreviousNames(projectId),
+    getLatestArtifact(projectId, "verbal_system"),
+  ]);
   const prevNaming = (existing?.data as Record<string, string> | null)?.naming ?? "";
 
   const namingText = await generateWithClaude(
-    NAMING_SYSTEM_PROMPT,
-    `${input}\n\nПредыдущие варианты:\n${prevNaming}\n\nКомментарий:\n${comment}\n\nПерегенерируй с учётом комментария.`,
+    REVISION_SYSTEM_PREFIX +
+    buildNamingSystemPrompt(previousNames) +
+    `\n\n<naming_methodology>\n${getNamingSkill()}\n</naming_methodology>` +
+    "\n\n" + await getStyleGuide(),
+    `Текущий результат:\n${prevNaming}\n\nКомментарий клиента:\n${comment}\n\nОбнови нейминг с учётом комментария. Сохрани всё что не было критиковано.`,
     { projectId, moduleNum: MODULE_NUM, maxTokens: 3000 }
   );
 
@@ -239,16 +342,41 @@ export async function handleNamingSelect(ctx: BotContext) {
 // ── Stage 2: Verbal System ────────────────────────────────────────────────────
 
 export async function handleNamingSelectInput(ctx: BotContext, selection: string) {
+  const cleanName = extractCleanName(selection);
+  ctx.session.pending_selection = cleanName;
+  ctx.session.awaiting_input = null;
+
+  const kb = new InlineKeyboard()
+    .text("✅ Подтвердить", "naming_proceed")
+    .text("↩️ Вернуться к вариантам", "verbal:back_to_naming");
+
+  await ctx.reply(
+    `Отлично, название — *«${cleanName}»*. Переходим к вербальной системе?`,
+    { parse_mode: "Markdown", reply_markup: kb }
+  );
+}
+
+export async function handleNamingProceed(ctx: BotContext) {
+  await ctx.answerCallbackQuery();
   const projectId = ctx.session.active_project_id;
   if (!projectId) return;
 
-  ctx.session.awaiting_input = null;
+  const selection = ctx.session.pending_selection;
+  if (!selection) {
+    await ctx.reply(
+      "Название не выбрано. Нажмите «⭐ Выбрать направление» и напишите название.",
+      { reply_markup: namingKeyboard() }
+    );
+    return;
+  }
+  ctx.session.pending_selection = null;
 
-  await ctx.reply(`Отличный выбор! Разрабатываю вербальную систему для «${selection}»...`);
+  await ctx.reply(`Разрабатываю вербальную систему для «${selection}»...`);
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
   const input = await buildVerbalInput(projectId, selection);
-  const verbalText = await generateWithClaude(VERBAL_SYSTEM_PROMPT, input, {
+  const verbalText = await generateWithClaude(VERBAL_SYSTEM_PROMPT + "\n\n" + await getStyleGuide(), input, {
     projectId,
     moduleNum: MODULE_NUM,
     maxTokens: 3500,
@@ -303,6 +431,7 @@ export async function handleVerbalRevisionInput(ctx: BotContext, comment: string
   if (!projectId) return;
 
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
   const existing = await getLatestArtifact(projectId, "verbal_system");
   const data = (existing?.data as Record<string, string>) ?? {};
@@ -311,8 +440,8 @@ export async function handleVerbalRevisionInput(ctx: BotContext, comment: string
 
   const input = await buildVerbalInput(projectId, selection);
   const verbalText = await generateWithClaude(
-    VERBAL_SYSTEM_PROMPT,
-    `${input}\n\nПредыдущая версия вербальной системы:\n${prevVerbal}\n\nКомментарий:\n${comment}\n\nПерегенерируй с учётом комментария.`,
+    REVISION_SYSTEM_PREFIX + VERBAL_SYSTEM_PROMPT + "\n\n" + await getStyleGuide(),
+    `Текущий результат:\n${prevVerbal}\n\nКомментарий клиента:\n${comment}\n\nОбнови вербальную систему с учётом комментария. Сохрани всё что не было критиковано.`,
     { projectId, moduleNum: MODULE_NUM, maxTokens: 3500 }
   );
 

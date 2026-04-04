@@ -1,12 +1,17 @@
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
-import { generateWithClaude } from "../ai/gateway";
-import { getActiveBrief } from "../db/briefs";
+import { generateWithClaude, REVISION_SYSTEM_PREFIX } from "../ai/gateway";
+import { getActiveBrief, getUploadedDocumentsContext } from "../db/briefs";
 import { saveArtifact, getLatestArtifact, approveArtifact } from "../db/artifacts";
 import { getLatestModuleRun } from "../db/moduleRuns";
 import { updateCurrentModule, updateProjectStatus } from "../db/projects";
 import { sendLongMessage } from "../utils/telegram";
-import { sendNextStep } from "../utils/nextStep";
+import { getStyleGuide } from "../prompts/styleGuide";
+
+const emptyBriefKeyboard = new InlineKeyboard()
+  .text("💬 Пройти брифинг", "start_briefing")
+  .row()
+  .text("📎 Загрузить файл", "upload_file");
 
 const MODULE_NUM = 2;
 
@@ -47,21 +52,40 @@ function dnaKeyboard(artifactId: string) {
     .text("✅ Одобрить", `dna:approve:${artifactId}`)
     .text("✏️ Доработать", `dna:revise:${artifactId}`)
     .row()
-    .text("↩️ Вернуться к брифу", "dna:back_to_brief");
+    .text("↩️ К брифу", "dna:back_to_brief")
+    .text("📊 Статус", "nav:status");
 }
 
 async function getBriefContent(projectId: string): Promise<string> {
   const brief = await getActiveBrief(projectId);
+
+  console.log("[brandDna] projectId:", projectId);
+  console.log("[brandDna] briefData:", JSON.stringify(brief?.data ?? null).substring(0, 200));
+
   if (!brief) throw new Error("Brief not found");
 
   const data = (brief.data as Record<string, unknown>) ?? {};
-  // Prefer structured summary, fall back to raw dialog
-  if (brief.summary) return brief.summary;
-  if (data.structured) return data.structured as string;
 
-  // Last resort: flatten dialog
+  // 1. Structured summary (classic briefing completed)
+  if (brief.summary?.trim()) return brief.summary;
+  if ((data.structured as string | undefined)?.trim()) return data.structured as string;
+
+  // 2. Flatten dialog messages from interactive briefing
   const dialog = (data.dialog as Array<{ role: string; content: string }>) ?? [];
-  return dialog.map((m) => `${m.role === "user" ? "Клиент" : "Стратег"}: ${m.content}`).join("\n\n");
+  if (dialog.length > 0) {
+    const content = dialog
+      .map((m) => `${m.role === "user" ? "Клиент" : "Стратег"}: ${m.content}`)
+      .join("\n\n");
+    if (content.trim()) return content;
+  }
+
+  // 3. Uploaded documents (PDF uploaded via handleDocUse)
+  const docsContext = await getUploadedDocumentsContext(projectId);
+  console.log("[brandDna] uploaded_documents context length:", docsContext.length);
+  if (docsContext.trim()) return docsContext;
+
+  // Nothing found
+  return "";
 }
 
 export async function runBrandDna(ctx: BotContext) {
@@ -70,9 +94,27 @@ export async function runBrandDna(ctx: BotContext) {
 
   await ctx.reply("🧬 Запускаю модуль Brand DNA... Анализирую бриф...");
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
-  const briefContent = await getBriefContent(projectId);
-  const dnaText = await generateWithClaude(SYSTEM_PROMPT, briefContent, {
+  let briefContent: string;
+  try {
+    briefContent = await getBriefContent(projectId);
+  } catch {
+    await ctx.reply(
+      "Данные брифа не найдены. Возможно произошёл сбой. Пройдите брифинг заново или загрузите файл.",
+      { reply_markup: emptyBriefKeyboard }
+    );
+    return;
+  }
+
+  if (!briefContent || briefContent.trim().length === 0) {
+    await ctx.reply(
+      "Данные брифа не найдены. Возможно произошёл сбой. Пройдите брифинг заново или загрузите файл.",
+      { reply_markup: emptyBriefKeyboard }
+    );
+    return;
+  }
+  const dnaText = await generateWithClaude(SYSTEM_PROMPT + "\n\n" + await getStyleGuide(), briefContent, {
     projectId,
     moduleNum: MODULE_NUM,
     maxTokens: 3000,
@@ -105,16 +147,13 @@ export async function runBrandDna(ctx: BotContext) {
 
 export async function handleDnaApprove(ctx: BotContext, artifactId: string) {
   await ctx.answerCallbackQuery();
-
   await approveArtifact(artifactId);
-
   const projectId = ctx.session.active_project_id;
   if (!projectId) return;
-
   await updateCurrentModule(projectId, 3);
   ctx.session.current_module = 3;
-
-  await sendNextStep(ctx, projectId, "✅ *Brand DNA одобрена!*");
+  const { showOrRunModule } = await import("./moduleNav");
+  await showOrRunModule(ctx, 3);
 }
 
 export async function handleDnaRevise(ctx: BotContext, artifactId: string) {
@@ -130,18 +169,36 @@ export async function handleDnaRevisionInput(ctx: BotContext, comment: string) {
   if (!projectId || !artifactId) return;
 
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
-  const briefContent = await getBriefContent(projectId);
+  let briefContent: string;
+  try {
+    briefContent = await getBriefContent(projectId);
+  } catch {
+    await ctx.reply(
+      "Данные брифа не найдены. Возможно произошёл сбой. Пройдите брифинг заново или загрузите файл.",
+      { reply_markup: emptyBriefKeyboard }
+    );
+    return;
+  }
+
+  if (!briefContent || briefContent.trim().length === 0) {
+    await ctx.reply(
+      "Данные брифа не найдены. Возможно произошёл сбой. Пройдите брифинг заново или загрузите файл.",
+      { reply_markup: emptyBriefKeyboard }
+    );
+    return;
+  }
+
   const existing = await getLatestArtifact(projectId, "brand_dna");
   const prevText = (existing?.data as Record<string, string> | null)?.text ?? "";
 
   const userMessage =
-    `Бриф проекта:\n${briefContent}\n\n` +
-    `Предыдущая версия Brand DNA:\n${prevText}\n\n` +
+    `Текущий результат:\n${prevText}\n\n` +
     `Комментарий клиента:\n${comment}\n\n` +
-    `Перегенерируй Brand DNA с учётом комментария, сохранив общую структуру.`;
+    `Обнови результат с учётом комментария. Сохрани всё что не было критиковано.`;
 
-  const dnaText = await generateWithClaude(SYSTEM_PROMPT, userMessage, {
+  const dnaText = await generateWithClaude(REVISION_SYSTEM_PREFIX + SYSTEM_PROMPT + "\n\n" + await getStyleGuide(), userMessage, {
     projectId,
     moduleNum: MODULE_NUM,
     maxTokens: 3000,

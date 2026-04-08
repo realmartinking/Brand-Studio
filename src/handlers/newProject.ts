@@ -1,7 +1,8 @@
+import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
 import { findOrCreateUser } from "../db/users";
 import { createProject } from "../db/projects";
-import { startBriefingDialog } from "../briefing/dialog";
+import { appendUploadedDocument } from "../db/briefs";
 
 export async function handleNewProject(ctx: BotContext) {
   ctx.session.awaiting_input = "project_name";
@@ -10,7 +11,17 @@ export async function handleNewProject(ctx: BotContext) {
 }
 
 export async function handleProjectNameInput(ctx: BotContext) {
-  const name = ctx.message?.text?.trim();
+  const text = (ctx.message?.text ?? "").trim();
+
+  // Если текст слишком длинный (>50 символов) или содержит вопросительный знак — скорее всего это не название
+  if (text.length > 50 || text.includes("?")) {
+    await ctx.reply(
+      "Похоже, это не название проекта. Напиши короткое название — например, «Кофейня Sunrise» или «Ребрендинг Алмаз».",
+    );
+    return; // awaiting_input остаётся "project_name", ждём настоящее название
+  }
+
+  const name = text;
   if (!name) return;
 
   const telegramId = BigInt(ctx.from!.id);
@@ -27,9 +38,36 @@ export async function handleProjectNameInput(ctx: BotContext) {
   ctx.session.briefing_step = 0;
   ctx.session.awaiting_input = null;
 
-  await ctx.reply(
-    `Проект «${name}» создан!\n\nНачинаем брифинг — я задам несколько вопросов, чтобы глубоко понять ваш проект.`
-  );
+  // If figma text was pending (user came from Figma extraction without a project), attach it to the new project's brief
+  if (ctx.session.pending_figma_text) {
+    try {
+      await appendUploadedDocument(project.id, {
+        filename: "figma_export.txt",
+        analysis: ctx.session.pending_figma_text,
+        addedAt: new Date().toISOString(),
+      });
+      ctx.session.pending_figma_text = null;
+      await ctx.reply(`Проект «${name}» создан! Текст из Figma добавлен в бриф.`);
+    } catch {
+      ctx.session.pending_figma_text = null;
+      await ctx.reply(`Проект «${name}» создан! (не удалось сохранить текст Figma в бриф)`);
+    }
 
-  await startBriefingDialog(ctx);
+    const keyboard = new InlineKeyboard()
+      .text("▶️ Начать работу", "start_briefing")
+      .row()
+      .text("📊 Статус проекта", "nav:status");
+    await ctx.reply("Как продолжим?", { reply_markup: keyboard });
+    return;
+  }
+
+  const keyboard = new InlineKeyboard()
+    .text("💬 Расскажу о проекте", "start_briefing")
+    .row()
+    .text("📎 Загрузить файл с описанием", "upload_file");
+
+  await ctx.reply(
+    `Проект «${name}» создан!\n\nКак хотите начать?`,
+    { reply_markup: keyboard }
+  );
 }

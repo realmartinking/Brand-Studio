@@ -1,9 +1,18 @@
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import sharp from "sharp";
 import pdfParse from "pdf-parse";
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
 import { generateWithClaude } from "../ai/gateway";
-import { getActiveBrief, appendUploadedDocument, appendDialogMessage } from "../db/briefs";
+import { claude, CLAUDE_MODEL } from "../ai/claude";
+import { getActiveBrief, appendUploadedDocument, appendDialogMessage, completeBrief } from "../db/briefs";
 import { sendLongMessage } from "../utils/telegram";
+
+const execFileAsync = promisify(execFile);
 
 const ANALYSIS_PROMPT = `Проанализируй этот документ. Определи:
 1. Тип документа (бренд-платформа, исследование рынка, брендбук, презентация, бриф, другое)
@@ -32,6 +41,84 @@ function afterAnalysisKeyboard(briefSufficient: boolean, briefComplete: boolean)
   return kb;
 }
 
+// ── Image compression helper ──────────────────────────────────────────────────
+
+async function compressImage(inputPath: string): Promise<Buffer> {
+  let quality = 80;
+  let buffer = await sharp(inputPath).jpeg({ quality }).toBuffer();
+
+  while (buffer.length > 4 * 1024 * 1024 && quality > 20) {
+    quality -= 15;
+    buffer = await sharp(inputPath).jpeg({ quality }).toBuffer();
+  }
+
+  if (buffer.length > 4 * 1024 * 1024) {
+    buffer = await sharp(inputPath)
+      .resize(1200, 1600, { fit: "inside" })
+      .jpeg({ quality: 60 })
+      .toBuffer();
+  }
+
+  return buffer;
+}
+
+// ── Vision OCR for scanned PDFs ───────────────────────────────────────────────
+
+async function extractTextFromScannedPdf(
+  pdfBuffer: Buffer,
+  numpages: number
+): Promise<string> {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bs-ocr-"));
+  try {
+    const pdfPath = path.join(tmpDir, "input.pdf");
+    const outPrefix = path.join(tmpDir, "page");
+    fs.writeFileSync(pdfPath, pdfBuffer);
+
+    const pageLimit = Math.min(numpages, 5);
+    await execFileAsync("pdftoppm", [
+      "-r", "150",
+      "-png",
+      "-l", String(pageLimit),
+      pdfPath,
+      outPrefix,
+    ]);
+
+    const pngFiles = fs.readdirSync(tmpDir)
+      .filter((f) => f.startsWith("page") && f.endsWith(".png"))
+      .sort();
+
+    const pageTexts: string[] = [];
+    for (const file of pngFiles) {
+      const compressed = await compressImage(path.join(tmpDir, file));
+      const base64 = compressed.toString("base64");
+
+      const res = await claude.messages.create({
+        model: CLAUDE_MODEL,
+        max_tokens: 4000,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "image" as const,
+              source: { type: "base64" as const, media_type: "image/jpeg" as const, data: base64 },
+            },
+            {
+              type: "text" as const,
+              text: "Извлеки весь текст с этого изображения. Если есть визуальные элементы (логотипы, схемы, мудборды) — опиши их.",
+            },
+          ],
+        }],
+      });
+
+      pageTexts.push((res.content[0] as { type: string; text: string }).text);
+    }
+
+    return pageTexts.join("\n\n---\n\n");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function handleProjectDocument(ctx: BotContext): Promise<void> {
@@ -43,6 +130,11 @@ export async function handleProjectDocument(ctx: BotContext): Promise<void> {
 
   if (doc.mime_type !== "application/pdf") {
     await ctx.reply("Поддерживаются только PDF-файлы.");
+    return;
+  }
+
+  if (doc.file_size && doc.file_size > 20 * 1024 * 1024) {
+    await ctx.reply("Файл слишком большой (максимум 20 МБ). Попробуйте сжать PDF или разбить на части.");
     return;
   }
 
@@ -60,6 +152,10 @@ export async function handleProjectDocument(ctx: BotContext): Promise<void> {
     pdfBuffer = Buffer.from(await response.arrayBuffer());
   } catch (err) {
     console.error("[pdfUpload] download error:", err);
+    if ((err as Error).message?.toLowerCase().includes("file is too big")) {
+      await ctx.reply("Файл слишком большой (максимум 20 МБ). Попробуйте сжать PDF или разбить на части.");
+      return;
+    }
     await ctx.reply(`❌ Не удалось скачать файл: ${(err as Error).message}`);
     return;
   }
@@ -67,18 +163,30 @@ export async function handleProjectDocument(ctx: BotContext): Promise<void> {
   // ── Extract text ──────────────────────────────────────────────────────────
 
   let extractedText: string;
+  let numpages = 1;
   try {
     const data = await pdfParse(pdfBuffer);
     extractedText = data.text.trim();
+    numpages = data.numpages;
   } catch (err) {
     console.error("[pdfUpload] parse error:", err);
     await ctx.reply(`❌ Не удалось прочитать PDF: ${(err as Error).message}`);
     return;
   }
 
-  if (!extractedText) {
-    await ctx.reply("PDF не содержит извлекаемого текста (возможно, это сканированное изображение).");
-    return;
+  if (!extractedText || extractedText.length < 50) {
+    await ctx.reply("📷 Обычный текст не найден — похоже, это скан. Читаю через Vision API...");
+    await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+    await ctx.reply("💭 Думаю...");
+    try {
+      extractedText = await extractTextFromScannedPdf(pdfBuffer, numpages);
+    } catch (err) {
+      console.error("[pdfUpload] vision OCR error:", err);
+    }
+    if (!extractedText || extractedText.trim().length === 0) {
+      await ctx.reply("PDF не содержит извлекаемого текста (возможно, это сканированное изображение).");
+      return;
+    }
   }
 
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
@@ -144,12 +252,16 @@ export async function handleDocUse(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Persist to brief.data.uploaded_documents[]
+  // Persist to briefs.data.uploaded_documents[] for projectId
+  console.log("[pdfUpload] saving to uploaded_documents, projectId:", projectId, "filename:", filename, "analysisLen:", analysis.length);
   await appendUploadedDocument(projectId, {
     filename,
     analysis,
     addedAt: new Date().toISOString(),
   });
+
+  // Mark brief as complete so module 1 is counted as done in getProjectState
+  await completeBrief(projectId);
 
   // If currently in briefing — inject as dialog message so Claude sees it immediately
   if (ctx.session.awaiting_input === "briefing") {
@@ -166,6 +278,14 @@ export async function handleDocUse(ctx: BotContext): Promise<void> {
     `✅ Данные из «${filename}» добавлены в контекст проекта.\n` +
     "Они будут автоматически учитываться при генерации всех последующих модулей."
   );
+
+  const nextKeyboard = new InlineKeyboard()
+    .text("▶️ Создать бренд-платформу", "module:2:start")
+    .row()
+    .text("📎 Загрузить ещё файл", "doc:more")
+    .text("💬 Дополнить брифингом", "module:1:start");
+
+  await ctx.reply("Что дальше?", { reply_markup: nextKeyboard });
 }
 
 // ── doc:skip ──────────────────────────────────────────────────────────────────
@@ -240,4 +360,92 @@ export async function handleDocBriefContinue(ctx: BotContext): Promise<void> {
   ctx.session.awaiting_input = "briefing";
 
   await ctx.reply("Хорошо, продолжаем брифинг. Данные из документа добавлены как контекст.");
+}
+
+// ── Photo / image message handler ─────────────────────────────────────────────
+
+export async function handlePhotoMessage(ctx: BotContext): Promise<void> {
+  const photos = ctx.message?.photo;
+  if (!photos || photos.length === 0) return;
+
+  // Telegram provides multiple sizes; last is highest resolution
+  const photo = photos[photos.length - 1];
+
+  await ctx.reply("📷 Читаю изображение...");
+  await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
+
+  let imageBuffer: Buffer;
+  try {
+    const file = await ctx.api.getFile(photo.file_id);
+    const token = process.env.BOT_TOKEN!;
+    const response = await fetch(
+      `https://api.telegram.org/file/bot${token}/${file.file_path}`
+    );
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    imageBuffer = Buffer.from(await response.arrayBuffer());
+  } catch (err) {
+    console.error("[vision] download error:", err);
+    await ctx.reply(`❌ Не удалось скачать изображение: ${(err as Error).message}`);
+    return;
+  }
+
+  let description: string;
+  try {
+    let compressed = imageBuffer;
+    if (imageBuffer.length > 4 * 1024 * 1024) {
+      let quality = 80;
+      compressed = await sharp(imageBuffer).jpeg({ quality }).toBuffer();
+      while (compressed.length > 4 * 1024 * 1024 && quality > 20) {
+        quality -= 15;
+        compressed = await sharp(imageBuffer).jpeg({ quality }).toBuffer();
+      }
+      if (compressed.length > 4 * 1024 * 1024) {
+        compressed = await sharp(imageBuffer)
+          .resize(1200, 1600, { fit: "inside" })
+          .jpeg({ quality: 60 })
+          .toBuffer();
+      }
+    }
+    const base64 = compressed.toString("base64");
+    const res = await claude.messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 1000,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "image" as const,
+            source: { type: "base64" as const, media_type: "image/jpeg" as const, data: base64 },
+          },
+          {
+            type: "text" as const,
+            text: "Опиши это изображение. Если есть текст — извлеки его. Если это мудборд, логотип или дизайн — опиши стиль, цвета, композицию.",
+          },
+        ],
+      }],
+    });
+    description = (res.content[0] as { type: string; text: string }).text;
+  } catch (err) {
+    console.error("[vision] Claude API error:", err);
+    await ctx.reply("❌ Не удалось обработать изображение.");
+    return;
+  }
+
+  const projectId = ctx.session.active_project_id;
+
+  await sendLongMessage(ctx, `🖼 *Анализ изображения:*\n\n${description}`, {
+    parse_mode: "Markdown",
+  });
+
+  if (projectId) {
+    ctx.session.pending_doc_analysis = description;
+    ctx.session.pending_doc_filename = "Изображение";
+
+    const kb = new InlineKeyboard()
+      .text("✅ Добавить в проект", "doc:use")
+      .text("❌ Нет", "doc:skip");
+
+    await ctx.reply("Хотите добавить это описание в контекст проекта?", { reply_markup: kb });
+  }
 }

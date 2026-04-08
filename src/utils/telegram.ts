@@ -78,12 +78,17 @@ export async function sendLongMessage(
     try {
       await ctx.reply(parts[i], sendOptions);
     } catch (err) {
+      const msg = (err as Error).message ?? "";
       console.error(
         `[sendLongMessage] Failed to send part ${i + 1}/${parts.length}:`,
-        (err as Error).message
+        msg
       );
-      // Try sending without Markdown in case of parse error
-      if (parse_mode === "Markdown") {
+      // If Telegram rejected due to bad markup, retry without parse_mode
+      const isParseError =
+        msg.includes("can't parse entities") ||
+        msg.includes("Bad Request") ||
+        msg.includes("entity");
+      if (parse_mode && isParseError) {
         try {
           await ctx.reply(parts[i], {
             ...sendOptions,

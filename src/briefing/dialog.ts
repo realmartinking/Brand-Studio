@@ -9,6 +9,7 @@ import {
   appendDialogMessage,
   saveStructuredBrief,
   completeBrief,
+  clearBriefDialog,
 } from "../db/briefs";
 import { sendLongMessage } from "../utils/telegram";
 
@@ -17,6 +18,27 @@ const OPENING_QUESTION =
 
 export async function startBriefingDialog(ctx: BotContext) {
   const projectId = ctx.session.active_project_id!;
+
+  // Check for existing progress from a previous session
+  const existingDialog = await getDialog(projectId);
+  const userMessages = existingDialog.filter((m) => m.role === "user");
+
+  if (userMessages.length > 0) {
+    const summary = userMessages
+      .slice(-3)
+      .map((m) => `— ${m.content.slice(0, 100)}${m.content.length > 100 ? "…" : ""}`)
+      .join("\n");
+
+    const kb = new InlineKeyboard()
+      .text("▶️ Продолжить", "briefing_resume")
+      .text("🔄 Начать заново", "briefing_restart");
+
+    await ctx.reply(
+      `Вижу что мы уже начинали. Вот что я знаю:\n\n${summary}\n\nПродолжим с этого места?`,
+      { reply_markup: kb }
+    );
+    return;
+  }
 
   await appendDialogMessage(projectId, {
     role: "assistant",
@@ -27,12 +49,37 @@ export async function startBriefingDialog(ctx: BotContext) {
   await ctx.reply(OPENING_QUESTION);
 }
 
+export async function resumeBriefingDialog(ctx: BotContext): Promise<void> {
+  const projectId = ctx.session.active_project_id;
+  if (!projectId) return;
+
+  ctx.session.awaiting_input = "briefing";
+
+  const dialog = await getDialog(projectId);
+  const lastAssistant = [...dialog].reverse().find((m) => m.role === "assistant");
+
+  await ctx.reply(
+    lastAssistant
+      ? `Продолжаем. Последний вопрос:\n\n${lastAssistant.content}`
+      : "Продолжаем брифинг. Расскажите о вашем проекте."
+  );
+}
+
+export async function restartBriefingDialog(ctx: BotContext): Promise<void> {
+  const projectId = ctx.session.active_project_id;
+  if (!projectId) return;
+
+  await clearBriefDialog(projectId);
+  await startBriefingDialog(ctx);
+}
+
 export async function handleUserMessage(ctx: BotContext, userText: string) {
   const projectId = ctx.session.active_project_id;
   if (!projectId) return;
 
   await appendDialogMessage(projectId, { role: "user", content: userText });
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
   const dialog = await getDialog(projectId);
   const { text, isComplete } = await generateNextQuestion(dialog);
@@ -61,6 +108,7 @@ export async function handleSummarize(ctx: BotContext) {
 
   await ctx.reply("Формирую бриф проекта...");
   await ctx.api.sendChatAction(ctx.chat!.id, "typing");
+  await ctx.reply("💭 Думаю...");
 
   const dialog = await getDialog(projectId);
   const structured = await generateStructuredBrief(dialog);

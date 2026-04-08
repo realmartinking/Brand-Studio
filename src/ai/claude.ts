@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { getStyleGuide } from "../prompts/styleGuide";
 
 export const claude = new Anthropic({
   apiKey: process.env.CLAUDE_API_KEY,
@@ -72,7 +73,7 @@ export async function generateNextQuestion(
   const response = await claude.messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 1024,
-    system: BRIEFING_SYSTEM_PROMPT,
+    system: BRIEFING_SYSTEM_PROMPT + "\n\n" + await getStyleGuide(),
     messages: dialog,
   });
 
@@ -93,7 +94,7 @@ export async function generateStructuredBrief(
   const response = await claude.messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 2048,
-    system: SUMMARY_SYSTEM_PROMPT,
+    system: SUMMARY_SYSTEM_PROMPT + "\n\n" + await getStyleGuide(),
     messages: [{ role: "user", content: transcript }],
   });
 

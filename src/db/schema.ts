@@ -122,6 +122,13 @@ export const artifacts = pgTable("artifacts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const studioSettings = pgTable("studio_settings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: varchar("key", { length: 255 }).notNull().unique(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const figmaReferences = pgTable("figma_references", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")

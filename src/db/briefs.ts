@@ -47,6 +47,16 @@ export async function saveStructuredBrief(
     .where(eq(briefs.id, brief.id));
 }
 
+export async function clearBriefDialog(projectId: string): Promise<void> {
+  const brief = await getActiveBrief(projectId);
+  if (!brief) return;
+  const data = (brief.data as Record<string, unknown>) ?? {};
+  await db
+    .update(briefs)
+    .set({ data: { ...data, dialog: [] } })
+    .where(eq(briefs.id, brief.id));
+}
+
 export async function completeBrief(projectId: string) {
   const brief = await getActiveBrief(projectId);
   if (!brief) return;

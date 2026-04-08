@@ -1,4 +1,4 @@
-import { BotError, GrammyError, HttpError } from "grammy";
+import { BotError, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
 
 const STALE_QUERY_PHRASES = [
@@ -43,9 +43,16 @@ export async function globalErrorHandler(err: BotError<BotContext>) {
 
   // ── Notify user ───────────────────────────────────────────────────────────
   try {
-    await ctx.reply(
-      "⚠️ Произошла ошибка. Попробуйте ещё раз или напишите /start"
-    );
+    const keyboard = new InlineKeyboard();
+
+    if (ctx.session?.current_module) {
+      keyboard.text("🔄 Повторить", `module:${ctx.session.current_module}:start`);
+      keyboard.row();
+    }
+    keyboard.text("📊 Статус", "nav:status");
+    keyboard.text("📂 Проекты", "my_projects");
+
+    await ctx.reply("⚠️ Что-то пошло не так. Попробуем ещё раз?", { reply_markup: keyboard });
   } catch {
     // If we can't even send the error message, log and move on
     console.error("[BotError] Failed to send error message to user");

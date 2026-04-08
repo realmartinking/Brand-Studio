@@ -7,6 +7,7 @@ import {
 } from "../integrations/figma";
 import { saveFigmaReference, getFigmaReferences, deleteFigmaReferences } from "../db/figmaRefs";
 import { updateStyleGuide } from "../db/projects";
+import { appendUploadedDocument } from "../db/briefs";
 import { generateWithClaude } from "../ai/gateway";
 import { getUserRole, isPrivileged } from "../db/queries";
 
@@ -61,6 +62,22 @@ function afterExtractionKeyboard() {
     .text("✅ Готово, создать Style Guide", "figma:style_guide");
 }
 
+function withProjectKeyboard() {
+  return new InlineKeyboard()
+    .text("📋 Добавить в бриф проекта", "figma:use_as_brief")
+    .row()
+    .text("🎨 Создать Style Guide", "figma:style_guide")
+    .row()
+    .text("📎 Сохранить как референс", "figma:save_ref");
+}
+
+function withoutProjectKeyboard() {
+  return new InlineKeyboard()
+    .text("🚀 Создать проект с этими данными", "figma:new_project")
+    .row()
+    .text("🎨 Создать Style Guide", "figma:style_guide");
+}
+
 // ── /figma [url] ──────────────────────────────────────────────────────────────
 
 export async function handleFigmaCommand(ctx: BotContext): Promise<void> {
@@ -73,10 +90,8 @@ export async function handleFigmaCommand(ctx: BotContext): Promise<void> {
   console.log(`[/figma] command received, args="${args}"`);
 
   if (!args) {
-    await ctx.reply(
-      "Укажи ссылку на Figma-файл:\n`/figma https://www.figma.com/design/КЛЮЧ/...`",
-      { parse_mode: "Markdown" }
-    );
+    ctx.session.awaiting_input = "figma_url";
+    await ctx.reply("Отправьте ссылку на Figma-файл.");
     return;
   }
 
@@ -91,15 +106,22 @@ export async function handleFigmaCommand(ctx: BotContext): Promise<void> {
     return;
   }
 
+  await processFigmaFile(ctx, fileKey);
+}
+
+// ── Shared: load file pages and show page selector ────────────────────────────
+
+export async function processFigmaFile(ctx: BotContext, fileKey: string): Promise<void> {
+  console.log(`[figma] processFigmaFile fileKey="${fileKey}"`);
   await ctx.reply("⏳ Загружаю страницы файла Figma...");
 
   let pages: Array<{ id: string; name: string }>;
   try {
     pages = await getFilePages(fileKey);
-    console.log(`[/figma] loaded ${pages.length} pages for fileKey="${fileKey}"`);
+    console.log(`[figma] loaded ${pages.length} pages`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[/figma] getFilePages error:`, err);
+    console.error(`[figma] getFilePages error:`, err);
     await ctx.reply(`❌ Ошибка при обращении к Figma API:\n\`${message}\``, {
       parse_mode: "Markdown",
     });
@@ -218,11 +240,74 @@ export async function handleFigmaPageSelected(
   }
 
   ctx.session.figma_file_key = null;
+  ctx.session.pending_figma_text = content;
 
+  const hasProject = !!ctx.session.active_project_id;
+  await ctx.reply(
+    "Что дальше?",
+    { reply_markup: hasProject ? withProjectKeyboard() : withoutProjectKeyboard() }
+  );
+}
+
+// ── Callback: figma:use_as_brief ──────────────────────────────────────────────
+
+export async function handleFigmaUseAsBrief(ctx: BotContext): Promise<void> {
+  await ctx.answerCallbackQuery();
+
+  const projectId = ctx.session.active_project_id;
+  if (!projectId) {
+    await ctx.reply("Нет активного проекта.");
+    return;
+  }
+
+  const text = ctx.session.pending_figma_text;
+  if (!text) {
+    await ctx.reply("Данные Figma не найдены. Попробуй извлечь текст ещё раз.");
+    return;
+  }
+
+  try {
+    await appendUploadedDocument(projectId, {
+      filename: "figma_export.txt",
+      analysis: text,
+      addedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await ctx.reply(`❌ Не удалось сохранить в бриф:\n${message}`);
+    return;
+  }
+
+  ctx.session.pending_figma_text = null;
+
+  await ctx.reply(
+    "✅ Текст из Figma добавлен в бриф проекта.",
+    {
+      reply_markup: new InlineKeyboard()
+        .text("▶️ Создать бренд-платформу", `module_resume:${ctx.session.current_module ?? 1}`)
+        .row()
+        .text("📎 Загрузить ещё", "figma:load_more"),
+    }
+  );
+}
+
+// ── Callback: figma:save_ref ──────────────────────────────────────────────────
+
+export async function handleFigmaSaveRef(ctx: BotContext): Promise<void> {
+  await ctx.answerCallbackQuery();
+  ctx.session.pending_figma_text = null;
   await ctx.reply(
     "Что дальше?",
     { reply_markup: afterExtractionKeyboard() }
   );
+}
+
+// ── Callback: figma:new_project ───────────────────────────────────────────────
+
+export async function handleFigmaNewProject(ctx: BotContext): Promise<void> {
+  await ctx.answerCallbackQuery();
+  ctx.session.awaiting_input = "project_name";
+  await ctx.reply("Как назовём проект?");
 }
 
 // ── Callback: figma:load_more ─────────────────────────────────────────────────
@@ -295,7 +380,9 @@ export async function handleFigmaStyleGuide(ctx: BotContext): Promise<void> {
 // ── /figma_clear ──────────────────────────────────────────────────────────────
 
 export async function handleFigmaClear(ctx: BotContext): Promise<void> {
-  if (!isPrivileged(await getUserRole(BigInt(ctx.from!.id)))) {
+  const telegramId = BigInt(ctx.from!.id);
+  const role = await getUserRole(telegramId);
+  if (!isPrivileged(role)) {
     await ctx.reply("Команда доступна только менеджерам и администраторам.");
     return;
   }

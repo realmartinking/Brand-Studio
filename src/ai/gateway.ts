@@ -115,11 +115,19 @@ async function callClaude(
   };
 }
 
+function isValidOpenAiKey(key: string | undefined): key is string {
+  return !!key && !key.includes("your_") && key.startsWith("sk-");
+}
+
 async function callGPT(
   systemPrompt: string,
   userMessage: string,
   maxTokens = 2048
 ): Promise<RunResult> {
+  if (!isValidOpenAiKey(process.env.OPENAI_API_KEY)) {
+    throw new Error("[AI] OpenAI API key is missing or invalid — skipping GPT fallback");
+  }
+
   const start = Date.now();
   const response = await openai.chat.completions.create({
     model: GPT_MODEL,
@@ -175,6 +183,9 @@ async function generate(
   userMessage: string,
   opts: GenerateOptions
 ): Promise<string> {
+  if (!userMessage || userMessage.trim().length === 0) {
+    throw new Error("Cannot call AI with empty user message. Brief data is missing.");
+  }
   let result: RunResult;
 
   try {
@@ -226,6 +237,14 @@ async function withStyleGuide(systemPrompt: string, projectId?: string): Promise
 
   return result;
 }
+
+// ── Revision prefix ───────────────────────────────────────────────────────────
+
+export const REVISION_SYSTEM_PREFIX =
+  "Ты получил комментарий от клиента к текущему результату. " +
+  "Твоя задача — ДОПОЛНИТЬ и УЛУЧШИТЬ существующий результат, а НЕ переписывать его целиком. " +
+  "Сохрани всё что клиент не критиковал. Внеси только те изменения которые клиент попросил. " +
+  "Если клиент говорит «добавить» или «дополнить» — добавь к существующему, не заменяй.\n\n";
 
 // ── Public API ────────────────────────────────────────────────────────────────
 

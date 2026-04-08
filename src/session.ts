@@ -8,6 +8,8 @@ export interface SessionData {
   role: string | null;
   pending_doc_analysis: string | null;
   pending_doc_filename: string | null;
+  pending_selection: string | null;
+  pending_figma_text: string | null;
 }
 
 export function initialSession(): SessionData {
@@ -21,5 +23,7 @@ export function initialSession(): SessionData {
     role: null,
     pending_doc_analysis: null,
     pending_doc_filename: null,
+    pending_selection: null,
+    pending_figma_text: null,
   };
 }

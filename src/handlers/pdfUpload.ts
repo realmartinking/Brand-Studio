@@ -9,7 +9,7 @@ import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
 import { generateWithClaude } from "../ai/gateway";
 import { claude, CLAUDE_MODEL } from "../ai/claude";
-import { getActiveBrief, appendUploadedDocument, appendDialogMessage, completeBrief } from "../db/briefs";
+import { getActiveBrief, appendUploadedDocument, appendDialogMessage, completeBrief, getUploadedDocumentsContext, saveStructuredBrief } from "../db/briefs";
 import { sendLongMessage } from "../utils/telegram";
 
 const execFileAsync = promisify(execFile);
@@ -263,6 +263,22 @@ export async function handleDocUse(ctx: BotContext): Promise<void> {
   // Mark brief as complete so module 1 is counted as done in getProjectState
   await completeBrief(projectId);
 
+  // Генерировать summary из загруженных документов если его ещё нет
+  const briefAfterComplete = await getActiveBrief(projectId);
+  if (briefAfterComplete && !briefAfterComplete.summary) {
+    const docsContext = await getUploadedDocumentsContext(projectId);
+    if (docsContext) {
+      const summaryText = await generateWithClaude(
+        "Ты — brand-стратег. На основе предоставленных материалов создай структурированный бриф проекта. " +
+        "Формат: Суть проекта, Продукт/Услуга, Целевая аудитория, Рынок и конкуренты, Ценности, Цели. " +
+        "Используй ТОЛЬКО информацию из документов. Если чего-то не хватает — отметь как '[не указано]'.",
+        docsContext,
+        { projectId, moduleNum: 1, maxTokens: 2000 }
+      );
+      await saveStructuredBrief(projectId, summaryText);
+    }
+  }
+
   // If currently in briefing — inject as dialog message so Claude sees it immediately
   if (ctx.session.awaiting_input === "briefing") {
     await appendDialogMessage(projectId, {
@@ -331,6 +347,22 @@ export async function handleDocBriefSkip(ctx: BotContext): Promise<void> {
   // Complete the brief automatically and proceed to Brand DNA
   const { completeBrief } = await import("../db/briefs");
   await completeBrief(projectId);
+
+  // Генерировать summary из загруженных документов если его ещё нет
+  const briefForSkip = await getActiveBrief(projectId);
+  if (briefForSkip && !briefForSkip.summary) {
+    const docsContext = await getUploadedDocumentsContext(projectId);
+    if (docsContext) {
+      const summaryText = await generateWithClaude(
+        "Ты — brand-стратег. На основе предоставленных материалов создай структурированный бриф проекта. " +
+        "Формат: Суть проекта, Продукт/Услуга, Целевая аудитория, Рынок и конкуренты, Ценности, Цели. " +
+        "Используй ТОЛЬКО информацию из документов. Если чего-то не хватает — отметь как '[не указано]'.",
+        docsContext,
+        { projectId, moduleNum: 1, maxTokens: 2000 }
+      );
+      await saveStructuredBrief(projectId, summaryText);
+    }
+  }
 
   await ctx.reply("⏩ Бриф заполнен из документа. Запускаю Brand DNA...");
 

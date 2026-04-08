@@ -1,7 +1,7 @@
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
 import { generateWithClaude, REVISION_SYSTEM_PREFIX } from "../ai/gateway";
-import { getActiveBrief } from "../db/briefs";
+import { getActiveBrief, getUploadedDocumentsContext } from "../db/briefs";
 import { saveArtifact, getLatestArtifact, getApprovedArtifact, getAllArtifactsOfType, approveArtifact } from "../db/artifacts";
 import { getLatestModuleRun } from "../db/moduleRuns";
 import { updateCurrentModule } from "../db/projects";
@@ -14,7 +14,9 @@ const MODULE_NUM = 3;
 
 // ── System prompts ────────────────────────────────────────────────────────────
 
-const NAMING_SYSTEM_PROMPT = `Ты — нейминг-стратег уровня топовых креативных агентств (SmartHeart, Shuka, Suprematika).
+const NAMING_SYSTEM_PROMPT = `ОБЯЗАТЕЛЬНО: Тебе предоставлены бриф и Brand DNA. Используй ИХ. Не проси клиента повторно описать бренд. Не задавай уточняющих вопросов — генерируй названия из того что есть.
+
+Ты — нейминг-стратег уровня топовых креативных агентств (SmartHeart, Shuka, Suprematika).
 
 ВАЖНО: Тебе предоставлена утверждённая бренд-платформа (Brand DNA). НЕ пересоздавай её, НЕ комментируй её. Используй КАК ЕСТЬ как основу для нейминга.
 
@@ -146,7 +148,18 @@ async function buildNamingInput(projectId: string): Promise<string> {
     (await getApprovedArtifact(projectId, "brand_dna")) ??
     (await getLatestArtifact(projectId, "brand_dna"));
 
-  const briefText = brief?.summary ?? "Бриф не найден";
+  // Brief: попробовать summary, потом uploaded_documents, потом dialog
+  let briefText = brief?.summary ?? "";
+  if (!briefText) {
+    briefText = await getUploadedDocumentsContext(projectId) || "";
+  }
+  if (!briefText) {
+    const data = (brief?.data as Record<string, unknown>) ?? {};
+    const dialog = (data.dialog as Array<{ role: string; content: string }>) ?? [];
+    briefText = dialog.map((m) => `${m.role === "user" ? "Клиент" : "Стратег"}: ${m.content}`).join("\n\n");
+  }
+  if (!briefText) briefText = "Бриф не найден";
+
   const dnaText = (dnaArtifact?.data as Record<string, string> | null)?.text ?? "Brand DNA не найдена";
 
   console.log("[naming] Brand DNA found:", dnaText.substring(0, 100));

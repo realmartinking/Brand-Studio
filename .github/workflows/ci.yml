@@ -32,7 +32,7 @@ jobs:
           # typecheck/test. Remove this line if you add E2E tests that
           # actually launch the browser.
           PUPPETEER_SKIP_DOWNLOAD: "true"
-        run: npm ci --no-audit --no-fund --omit=optional
+        run: npm ci --no-audit --no-fund --force
 
       - name: Typecheck
         run: npx tsc --noEmit

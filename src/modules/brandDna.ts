@@ -7,6 +7,9 @@ import { getLatestModuleRun } from "../db/moduleRuns";
 import { updateCurrentModule, updateProjectStatus } from "../db/projects";
 import { sendLongMessage } from "../utils/telegram";
 import { getStyleGuide } from "../prompts/styleGuide";
+import { logger } from "../config/logger";
+
+const log = logger.child({ mod: "brandDna" });
 
 const emptyBriefKeyboard = new InlineKeyboard()
   .text("💬 Пройти брифинг", "start_briefing")
@@ -64,8 +67,10 @@ function dnaKeyboard(artifactId: string) {
 async function getBriefContent(projectId: string): Promise<string> {
   const brief = await getActiveBrief(projectId);
 
-  console.log("[brandDna] projectId:", projectId);
-  console.log("[brandDna] briefData:", JSON.stringify(brief?.data ?? null).substring(0, 200));
+  log.debug(
+    { projectId, hasData: !!brief?.data, hasSummary: !!brief?.summary?.trim() },
+    "resolving brief content"
+  );
 
   if (!brief) throw new Error("Brief not found");
 
@@ -77,7 +82,7 @@ async function getBriefContent(projectId: string): Promise<string> {
 
   // 2. Uploaded documents (PDF uploaded via handleDocUse)
   const docsContext = await getUploadedDocumentsContext(projectId);
-  console.log("[brandDna] uploaded_documents context length:", docsContext.length);
+  log.debug({ projectId, docsLength: docsContext.length }, "uploaded_documents context");
   if (docsContext.trim()) return docsContext;
 
   // 3. Flatten dialog messages from interactive briefing
@@ -89,8 +94,9 @@ async function getBriefContent(projectId: string): Promise<string> {
     if (content.trim()) return content;
   }
 
-  // Nothing found
-  return "Бриф не заполнен. Работай с теми данными что есть.";
+  // Nothing found — return empty string so the caller shows the empty-brief keyboard
+  // instead of spending tokens on a meaningless Claude call.
+  return "";
 }
 
 export async function runBrandDna(ctx: BotContext) {

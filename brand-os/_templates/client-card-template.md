@@ -1,0 +1,56 @@
+---
+type: client
+name: "{{Brand/Project name}}"
+date: {{date}}
+status: briefing
+product_reality: ""
+segment: ""
+industry: ""
+place_heritage: ""
+sensory_constraints: ""
+price_architecture: ""
+visual_lifespan_years: 0
+geography: ""
+lifecycle_stage: ""
+scale: ""
+stage_timeline: ""
+regulatory_constraints: ""
+multilingual: false
+founder_story: ""
+audience_portrait: ""
+purchase_emotion: ""
+ambition_scale: ""
+internal_language: {}
+verbal_code: ""
+competitors: []
+anti_brand: ""
+name_neighbors: ""
+team: ""
+channels: []
+reading_speed: ""
+tactile_touchpoint: ""
+axes:
+  self_community: 0.5
+  control_release: 0.5
+  roots_horizon: 0.5
+  body_mind: 0.5
+  all_few: 0.5
+  loud_quiet: 0.5
+  serious_playful: 0.5
+  nature_technology: 0.5
+  geometry: 0.5
+  contrast: 0.5
+  rhythm: 0.5
+  density: 0.5
+  temperature: 0.5
+  weight: 0.5
+  distance: 0.5
+  speed: 0.5
+  participation: 0.5
+  repeatability: 0.5
+name_phonetics: ""
+name_pronounceability: ""
+without_logo_test: ""
+nearest_attractor: ""
+attractor_difference: ""
+---

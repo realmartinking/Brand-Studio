@@ -4,3 +4,5 @@ dist/
 .env.staging
 outputs/
 .claude/
+# Obsidian
+brand-os/.obsidian/

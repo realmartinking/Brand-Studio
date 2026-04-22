@@ -1,11 +1,24 @@
+/**
+ * Briefing-specific AI helpers.
+ *
+ * Previously used the Anthropic SDK directly, bypassing retry/fallback/cost tracking.
+ * Now delegates to gateway.ts like the rest of the codebase.
+ *
+ * NOTE: The `claude` and `CLAUDE_MODEL` exports are kept for backward-compatibility
+ * with handlers that still import them directly. New code should use gateway.ts.
+ * These will be removed once all callers are migrated.
+ */
+
 import Anthropic from "@anthropic-ai/sdk";
 import { getStyleGuide } from "../prompts/styleGuide";
+import { generateDialogWithClaude, generateWithClaude } from "./gateway";
+import { MODELS } from "../config/models";
 
-export const claude = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY,
-});
+/** @deprecated Import MODELS from config/models or call gateway.ts helpers instead. */
+export const claude = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
 
-export const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+/** @deprecated Use MODELS.claude.default / .classifier / .hero from config/models. */
+export const CLAUDE_MODEL = MODELS.claude.default;
 
 export type DialogMessage = {
   role: "user" | "assistant";
@@ -70,33 +83,28 @@ const SUMMARY_SYSTEM_PROMPT = `Ты — senior brand strategist. Тебе дан
 export async function generateNextQuestion(
   dialog: DialogMessage[]
 ): Promise<{ text: string; isComplete: boolean }> {
-  const response = await claude.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 1024,
-    system: BRIEFING_SYSTEM_PROMPT + "\n\n" + await getStyleGuide(),
-    messages: dialog,
+  const systemPrompt = BRIEFING_SYSTEM_PROMPT + "\n\n" + (await getStyleGuide());
+
+  const raw = await generateDialogWithClaude(systemPrompt, dialog, {
+    maxTokens: 1024,
+    tier: "default",
   });
 
-  const raw = (response.content[0] as Anthropic.TextBlock).text;
   const isComplete = raw.includes("[BRIEF_COMPLETE]");
   const text = raw.replace("[BRIEF_COMPLETE]", "").trimEnd();
 
   return { text, isComplete };
 }
 
-export async function generateStructuredBrief(
-  dialog: DialogMessage[]
-): Promise<string> {
+export async function generateStructuredBrief(dialog: DialogMessage[]): Promise<string> {
   const transcript = dialog
     .map((m) => `${m.role === "user" ? "Клиент" : "Стратег"}: ${m.content}`)
     .join("\n\n");
 
-  const response = await claude.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 2048,
-    system: SUMMARY_SYSTEM_PROMPT + "\n\n" + await getStyleGuide(),
-    messages: [{ role: "user", content: transcript }],
-  });
+  const systemPrompt = SUMMARY_SYSTEM_PROMPT + "\n\n" + (await getStyleGuide());
 
-  return (response.content[0] as Anthropic.TextBlock).text;
+  return generateWithClaude(systemPrompt, transcript, {
+    maxTokens: 2048,
+    tier: "default",
+  });
 }

@@ -1,24 +1,12 @@
 /**
  * Briefing-specific AI helpers.
  *
- * Previously used the Anthropic SDK directly, bypassing retry/fallback/cost tracking.
- * Now delegates to gateway.ts like the rest of the codebase.
- *
- * NOTE: The `claude` and `CLAUDE_MODEL` exports are kept for backward-compatibility
- * with handlers that still import them directly. New code should use gateway.ts.
- * These will be removed once all callers are migrated.
+ * All AI calls go through gateway.ts — this file is a thin domain layer
+ * that composes the briefing system prompt with the dialog history.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
 import { getStyleGuide } from "../prompts/styleGuide";
 import { generateDialogWithClaude, generateWithClaude } from "./gateway";
-import { MODELS } from "../config/models";
-
-/** @deprecated Import MODELS from config/models or call gateway.ts helpers instead. */
-export const claude = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
-
-/** @deprecated Use MODELS.claude.default / .classifier / .hero from config/models. */
-export const CLAUDE_MODEL = MODELS.claude.default;
 
 export type DialogMessage = {
   role: "user" | "assistant";

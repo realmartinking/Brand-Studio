@@ -10,7 +10,19 @@ import { logger } from "../config/logger";
 // ── Clients ──────────────────────────────────────────────────────────────────
 
 const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// OpenAI client is lazy: constructed on first use so missing
+// OPENAI_API_KEY doesn't crash the app at import time (e.g. in CI
+// where GPT fallback isn't exercised). The existing isValidOpenAiKey
+// guard in callGPT() still throws a clear error when GPT is actually
+// needed without a valid key.
+let openaiClient: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return openaiClient;
+}
 
 const log = logger.child({ mod: "ai.gateway" });
 
@@ -146,7 +158,7 @@ async function callGPT(
 
   const start = Date.now();
   const model = MODELS.openai.default;
-  const response = await openai.chat.completions.create({
+  const response = await getOpenAI().chat.completions.create({
     model,
     max_tokens: maxTokens,
     messages: [

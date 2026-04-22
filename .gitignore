@@ -3,6 +3,7 @@ dist/
 .env
 .env.staging
 outputs/
-.claude/
+.claude/*
+!.claude/skills/
 # Obsidian
 brand-os/.obsidian/

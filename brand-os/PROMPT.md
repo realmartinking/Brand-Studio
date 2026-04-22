@@ -6,7 +6,7 @@
 
 ```
 Создай полную структуру Brand OS в Obsidian vault по пути:
-~/Documents/Maks Martin/MaksMartinData/Brand OS/
+~/Brand-Studio/brand-os/
 
 НЕ УДАЛЯЙ ничего если папка уже существует — только создавай новое.
 

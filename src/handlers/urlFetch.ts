@@ -4,7 +4,10 @@ import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
 import { generateWithClaude } from "../ai/gateway";
 import { appendDialogMessage } from "../db/briefs";
+import { logger } from "../config/logger";
 
+
+const log = logger.child({ mod: "urlFetch" });
 const FETCH_TIMEOUT_MS = 30_000;
 
 // ── URL type detection & resolution ──────────────────────────────────────────
@@ -159,7 +162,7 @@ export async function handleUrlMessage(ctx: BotContext, url: string): Promise<vo
       await ctx.reply("Нет доступа к странице. Проверьте что ссылка открыта для всех.");
       return;
     }
-    console.error("[urlFetch] error:", err);
+    log.error({ err: (err as Error).message }, "error:");
     await ctx.reply(`❌ Не удалось загрузить страницу: ${e.message}`);
     return;
   }

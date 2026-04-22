@@ -1,6 +1,9 @@
 import { BotError, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
+import { logger } from "../config/logger";
 
+
+const log = logger.child({ mod: "errorHandler" });
 const STALE_QUERY_PHRASES = [
   "query is too old",
   "query ID is invalid",
@@ -55,6 +58,6 @@ export async function globalErrorHandler(err: BotError<BotContext>) {
     await ctx.reply("⚠️ Что-то пошло не так. Попробуем ещё раз?", { reply_markup: keyboard });
   } catch {
     // If we can't even send the error message, log and move on
-    console.error("[BotError] Failed to send error message to user");
+    log.error("Failed to send error message to user");
   }
 }

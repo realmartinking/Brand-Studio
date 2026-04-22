@@ -142,7 +142,7 @@ export async function handleProjectDocument(ctx: BotContext): Promise<void> {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     pdfBuffer = Buffer.from(await response.arrayBuffer());
   } catch (err) {
-    console.error("[pdfUpload] download error:", err);
+    log.error({ err: (err as Error).message }, "download error:");
     if ((err as Error).message?.toLowerCase().includes("file is too big")) {
       await ctx.reply("Файл слишком большой (максимум 20 МБ). Попробуйте сжать PDF или разбить на части.");
       return;
@@ -160,7 +160,7 @@ export async function handleProjectDocument(ctx: BotContext): Promise<void> {
     extractedText = data.text.trim();
     numpages = data.numpages;
   } catch (err) {
-    console.error("[pdfUpload] parse error:", err);
+    log.error({ err: (err as Error).message }, "parse error:");
     await ctx.reply(`❌ Не удалось прочитать PDF: ${(err as Error).message}`);
     return;
   }
@@ -172,7 +172,7 @@ export async function handleProjectDocument(ctx: BotContext): Promise<void> {
     try {
       extractedText = await extractTextFromScannedPdf(pdfBuffer, numpages);
     } catch (err) {
-      console.error("[pdfUpload] vision OCR error:", err);
+      log.error({ err: (err as Error).message }, "vision OCR error:");
     }
     if (!extractedText || extractedText.trim().length === 0) {
       await ctx.reply("PDF не содержит извлекаемого текста (возможно, это сканированное изображение).");
@@ -192,7 +192,7 @@ export async function handleProjectDocument(ctx: BotContext): Promise<void> {
       maxTokens: 2000,
     });
   } catch (err) {
-    console.error("[pdfUpload] analysis error:", err);
+    log.error({ err: (err as Error).message }, "analysis error:");
     await ctx.reply(`❌ Ошибка анализа документа: ${(err as Error).message}`);
     return;
   }
@@ -408,7 +408,7 @@ export async function handlePhotoMessage(ctx: BotContext): Promise<void> {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     imageBuffer = Buffer.from(await response.arrayBuffer());
   } catch (err) {
-    console.error("[vision] download error:", err);
+    log.error({ err: (err as Error).message }, "download error:");
     await ctx.reply(`❌ Не удалось скачать изображение: ${(err as Error).message}`);
     return;
   }

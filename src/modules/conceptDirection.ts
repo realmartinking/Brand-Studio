@@ -8,7 +8,10 @@ import { updateCurrentModule } from "../db/projects";
 import { sendLongMessage } from "../utils/telegram";
 import { sendNextStep } from "../utils/nextStep";
 import { getStyleGuide } from "../prompts/styleGuide";
+import { logger } from "../config/logger";
 
+
+const log = logger.child({ mod: "conceptDirection" });
 const MODULE_NUM = 4;
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -138,7 +141,7 @@ async function generate(
 // ── Run ───────────────────────────────────────────────────────────────────────
 
 export async function runConceptDirection(ctx: BotContext) {
-  console.log("[CONCEPT] runConceptDirection called");
+  log.info("runConceptDirection called");
   const projectId = ctx.session.active_project_id;
   if (!projectId) return;
 
@@ -148,9 +151,9 @@ export async function runConceptDirection(ctx: BotContext) {
     await ctx.reply("💭 Думаю...");
 
     const input = await buildInput(projectId);
-    console.log("[CONCEPT] buildInput OK, generating...");
+    log.info("buildInput OK, generating...");
     const { text, artifactId } = await generate(projectId, input);
-    console.log("[CONCEPT] generate OK, artifactId:", artifactId);
+    log.info({ artifactId }, "generate OK, artifactId:");
 
     await updateCurrentModule(projectId, MODULE_NUM);
     ctx.session.current_module = MODULE_NUM;
@@ -160,7 +163,7 @@ export async function runConceptDirection(ctx: BotContext) {
     await sendConcepts(ctx, text);
     await ctx.reply("Выберите действие:", { reply_markup: conceptsKeyboard() });
   } catch (error) {
-    console.error("[CONCEPT ERROR] runConceptDirection:", error);
+    log.error({ err: (error as Error).message }, "runConceptDirection:");
     throw error;
   }
 }
@@ -168,7 +171,7 @@ export async function runConceptDirection(ctx: BotContext) {
 // ── More ──────────────────────────────────────────────────────────────────────
 
 export async function handleConceptMore(ctx: BotContext) {
-  console.log("[CONCEPT] handleConceptMore called");
+  log.info("handleConceptMore called");
   await ctx.answerCallbackQuery();
   const projectId = ctx.session.active_project_id;
   if (!projectId) return;
@@ -186,14 +189,14 @@ export async function handleConceptMore(ctx: BotContext) {
       projectId,
       `${input}\n\nПредыдущие концепции (не повторяй):\n${prevConcepts}`
     );
-    console.log("[CONCEPT] handleConceptMore generated, artifactId:", artifactId);
+    log.info({ artifactId }, "handleConceptMore generated, artifactId:");
 
     ctx.session.module_state = artifactId;
 
     await sendConcepts(ctx, text);
     await ctx.reply("Выберите действие:", { reply_markup: conceptsKeyboard() });
   } catch (error) {
-    console.error("[CONCEPT ERROR] handleConceptMore:", error);
+    log.error({ err: (error as Error).message }, "handleConceptMore:");
     throw error;
   }
 }
@@ -201,14 +204,14 @@ export async function handleConceptMore(ctx: BotContext) {
 // ── Revise all ────────────────────────────────────────────────────────────────
 
 export async function handleConceptRevise(ctx: BotContext) {
-  console.log("[CONCEPT] handleConceptRevise called");
+  log.info("handleConceptRevise called");
   await ctx.answerCallbackQuery();
   ctx.session.awaiting_input = "concept_revision";
   await ctx.reply("Что хотите изменить? Укажите пожелания по направлениям, стилю или акцентам.");
 }
 
 export async function handleConceptRevisionInput(ctx: BotContext, comment: string) {
-  console.log("[CONCEPT] handleConceptRevisionInput called, comment:", comment);
+  log.info({ comment }, "handleConceptRevisionInput called, comment:");
   const projectId = ctx.session.active_project_id;
   if (!projectId) return;
 
@@ -225,7 +228,7 @@ export async function handleConceptRevisionInput(ctx: BotContext, comment: strin
       `Текущий результат:\n${prevConcepts}\n\nКомментарий клиента:\n${comment}\n\nОбнови концепции с учётом комментария. Сохрани всё что не было критиковано.`,
       REVISION_SYSTEM_PREFIX
     );
-    console.log("[CONCEPT] handleConceptRevisionInput generated, artifactId:", artifactId);
+    log.info({ artifactId }, "handleConceptRevisionInput generated, artifactId:");
 
     ctx.session.module_state = artifactId;
     ctx.session.awaiting_input = null;
@@ -233,7 +236,7 @@ export async function handleConceptRevisionInput(ctx: BotContext, comment: strin
     await sendConcepts(ctx, text);
     await ctx.reply("Выберите действие:", { reply_markup: conceptsKeyboard() });
   } catch (error) {
-    console.error("[CONCEPT ERROR] handleConceptRevisionInput:", error);
+    log.error({ err: (error as Error).message }, "handleConceptRevisionInput:");
     throw error;
   }
 }
@@ -241,7 +244,7 @@ export async function handleConceptRevisionInput(ctx: BotContext, comment: strin
 // ── Select ────────────────────────────────────────────────────────────────────
 
 export async function handleConceptSelect(ctx: BotContext) {
-  console.log("[CONCEPT] handleConceptSelect called");
+  log.info("handleConceptSelect called");
   await ctx.answerCallbackQuery();
   ctx.session.awaiting_input = "concept_select";
   await ctx.reply(
@@ -250,7 +253,7 @@ export async function handleConceptSelect(ctx: BotContext) {
 }
 
 export async function handleConceptSelectInput(ctx: BotContext, selection: string) {
-  console.log("[CONCEPT] handleConceptSelectInput called, selection:", selection);
+  log.info({ selection }, "handleConceptSelectInput called, selection:");
   ctx.session.pending_selection = selection;
   ctx.session.awaiting_input = null;
 
@@ -279,7 +282,7 @@ export async function handleConceptProceed(ctx: BotContext) {
   }
   ctx.session.pending_selection = null;
 
-  console.log("[CONCEPT] handleConceptProceed: selection:", selection);
+  log.info({ selection }, "handleConceptProceed: selection:");
 
   try {
     const existing = await getLatestArtifact(projectId, "concept_direction");
@@ -292,7 +295,7 @@ export async function handleConceptProceed(ctx: BotContext) {
     console.log("[CONCEPT] parsed concepts count:", concepts.length);
 
     const num = parseInt(selection.replace(/\D/g, ""), 10);
-    console.log("[CONCEPT] parsed num:", num);
+    log.info({ num }, "parsed num:");
 
     const selectedText =
       !isNaN(num) && concepts[num - 1]
@@ -327,9 +330,9 @@ export async function handleConceptProceed(ctx: BotContext) {
     await ctx.reply("Что делаем с концепцией?", {
       reply_markup: selectedConceptKeyboard(artifact.id),
     });
-    console.log("[CONCEPT] handleConceptProceed: reply sent with keyboard");
+    log.info("handleConceptProceed: reply sent with keyboard");
   } catch (error) {
-    console.error("[CONCEPT ERROR] handleConceptProceed:", error);
+    log.error({ err: (error as Error).message }, "handleConceptProceed:");
     throw error;
   }
 }
@@ -337,7 +340,7 @@ export async function handleConceptProceed(ctx: BotContext) {
 // ── Approve ───────────────────────────────────────────────────────────────────
 
 export async function handleConceptApprove(ctx: BotContext, artifactId: string) {
-  console.log("[CONCEPT] handleConceptApprove called, artifactId:", artifactId);
+  log.info({ artifactId }, "handleConceptApprove called, artifactId:");
   await ctx.answerCallbackQuery();
 
   try {
@@ -352,9 +355,9 @@ export async function handleConceptApprove(ctx: BotContext, artifactId: string) 
 
     const { showOrRunModule } = await import("./moduleNav");
     await showOrRunModule(ctx, 5);
-    console.log("[CONCEPT] handleConceptApprove: approved, moved to module 5");
+    log.info("handleConceptApprove: approved, moved to module 5");
   } catch (error) {
-    console.error("[CONCEPT ERROR] handleConceptApprove:", error);
+    log.error({ err: (error as Error).message }, "handleConceptApprove:");
     throw error;
   }
 }
@@ -362,7 +365,7 @@ export async function handleConceptApprove(ctx: BotContext, artifactId: string) 
 // ── Revise selected ───────────────────────────────────────────────────────────
 
 export async function handleConceptReviseSelected(ctx: BotContext, artifactId: string) {
-  console.log("[CONCEPT] handleConceptReviseSelected called, artifactId:", artifactId);
+  log.info({ artifactId }, "handleConceptReviseSelected called, artifactId:");
   await ctx.answerCallbackQuery();
   ctx.session.awaiting_input = "concept_selected_revision";
   ctx.session.module_state = artifactId;
@@ -373,7 +376,7 @@ export async function handleConceptSelectedRevisionInput(
   ctx: BotContext,
   comment: string
 ) {
-  console.log("[CONCEPT] handleConceptSelectedRevisionInput called, comment:", comment);
+  log.info({ comment }, "handleConceptSelectedRevisionInput called, comment:");
   const projectId = ctx.session.active_project_id;
   if (!projectId) return;
 
@@ -421,7 +424,7 @@ export async function handleConceptSelectedRevisionInput(
       reply_markup: selectedConceptKeyboard(artifact.id),
     });
   } catch (error) {
-    console.error("[CONCEPT ERROR] handleConceptSelectedRevisionInput:", error);
+    log.error({ err: (error as Error).message }, "handleConceptSelectedRevisionInput:");
     throw error;
   }
 }
@@ -429,7 +432,7 @@ export async function handleConceptSelectedRevisionInput(
 // ── Back ──────────────────────────────────────────────────────────────────────
 
 export async function handleBackToConcepts(ctx: BotContext) {
-  console.log("[CONCEPT] handleBackToConcepts called");
+  log.info("handleBackToConcepts called");
   await ctx.answerCallbackQuery();
 
   try {
@@ -451,7 +454,7 @@ export async function handleBackToConcepts(ctx: BotContext) {
     await sendConcepts(ctx, conceptsText);
     await ctx.reply("Выберите действие:", { reply_markup: conceptsKeyboard() });
   } catch (error) {
-    console.error("[CONCEPT ERROR] handleBackToConcepts:", error);
+    log.error({ err: (error as Error).message }, "handleBackToConcepts:");
     throw error;
   }
 }

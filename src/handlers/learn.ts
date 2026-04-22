@@ -6,7 +6,10 @@ import { BotContext } from "../types";
 import { getUserRole, isPrivileged, setStudioSetting } from "../db/queries";
 import { saveFigmaReference, countFigmaReferences, getFigmaReferences } from "../db/figmaRefs";
 import { generateWithClaude } from "../ai/gateway";
+import { logger } from "../config/logger";
 
+
+const log = logger.child({ mod: "learn" });
 const UPLOADS_DIR = path.resolve("uploads/learn");
 
 // ── Keyboards ─────────────────────────────────────────────────────────────────
@@ -104,7 +107,7 @@ export async function handleLearnDocument(ctx: BotContext): Promise<void> {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     pdfBuffer = Buffer.from(await response.arrayBuffer());
   } catch (err) {
-    console.error("[learn:pdf] download error:", err);
+    log.error({ err: (err as Error).message }, "download error:");
     if ((err as Error).message?.toLowerCase().includes("file is too big")) {
       await ctx.reply("Файл слишком большой (максимум 20 МБ). Попробуйте сжать PDF или разбить на части.");
       return;
@@ -127,7 +130,7 @@ export async function handleLearnDocument(ctx: BotContext): Promise<void> {
     extractedText = data.text.trim();
     console.log(`[learn:pdf] extracted ${extractedText.length} chars from "${filename}"`);
   } catch (err) {
-    console.error("[learn:pdf] parse error:", err);
+    log.error({ err: (err as Error).message }, "parse error:");
     await ctx.reply(`❌ Не удалось извлечь текст из PDF: ${(err as Error).message}`);
     return;
   }
@@ -149,7 +152,7 @@ export async function handleLearnDocument(ctx: BotContext): Promise<void> {
       source: "pdf",
     });
   } catch (err) {
-    console.error("[learn:pdf] save error:", err);
+    log.error({ err: (err as Error).message }, "save error:");
     await ctx.reply(`❌ Не удалось сохранить в базу: ${(err as Error).message}`);
     return;
   }
@@ -193,7 +196,7 @@ export async function handleLearnUpdateStyleGuide(ctx: BotContext): Promise<void
       { projectId, moduleNum: 0, maxTokens: 4000 }
     );
   } catch (err) {
-    console.error("[learn:update_style_guide] generation error:", err);
+    log.error({ err: (err as Error).message }, "generation error:");
     await ctx.reply(`❌ Ошибка при генерации Style Guide: ${(err as Error).message}`);
     return;
   }

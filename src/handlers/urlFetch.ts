@@ -2,7 +2,7 @@ import pdfParse from "pdf-parse";
 import { load } from "cheerio";
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
-import { claude, CLAUDE_MODEL } from "../ai/claude";
+import { generateWithClaude } from "../ai/gateway";
 import { appendDialogMessage } from "../db/briefs";
 
 const FETCH_TIMEOUT_MS = 30_000;
@@ -205,13 +205,14 @@ export async function handleUrlMessage(ctx: BotContext, url: string): Promise<vo
   await ctx.reply("💭 Думаю...");
   let summary: string;
   try {
-    const res = await claude.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 200,
-      system: "Кратко изложи суть текста в 2-3 предложениях на русском языке.",
-      messages: [{ role: "user", content: text }],
-    });
-    summary = (res.content[0] as { type: string; text: string }).text.trim();
+    summary = (
+      await generateWithClaude(
+        "Кратко изложи суть текста в 2-3 предложениях на русском языке.",
+        text,
+        { maxTokens: 200, tier: "classifier", softFail: true }
+      )
+    ).trim();
+    if (!summary) summary = text.slice(0, 500);
   } catch {
     summary = text.slice(0, 500);
   }

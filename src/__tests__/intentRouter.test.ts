@@ -2,13 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mock all external dependencies ───────────────────────────────────────────
 
+vi.mock('../ai/gateway', () => ({
+  generateWithClaude: vi.fn(),
+  generateDialogWithClaude: vi.fn(),
+  generateVisionWithClaude: vi.fn(),
+  REVISION_SYSTEM_PREFIX: '',
+}));
+
 vi.mock('../ai/claude', () => ({
-  claude: {
-    messages: {
-      create: vi.fn(),
-    },
-  },
-  CLAUDE_MODEL: 'test-model',
   generateNextQuestion: vi.fn(),
   generateStructuredBrief: vi.fn(),
 }));
@@ -93,7 +94,7 @@ vi.mock('../handlers/urlFetch', () => ({
 // ── Import after mocks ────────────────────────────────────────────────────────
 
 import { routeIntent } from '../handlers/intentRouter';
-import { claude } from '../ai/claude';
+import { generateWithClaude } from '../ai/gateway';
 import { handleProjects } from '../handlers/navigation';
 import { handleUrlMessage } from '../handlers/urlFetch';
 
@@ -127,11 +128,9 @@ function createMockCtx(sessionOverrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeClaudeResponse(json: object) {
-  return {
-    content: [{ type: 'text', text: JSON.stringify(json) }],
-    usage: { input_tokens: 10, output_tokens: 5 },
-  };
+// Gateway returns a plain string (unlike raw SDK content-blocks).
+function mockClaudeJson(json: object): string {
+  return JSON.stringify(json);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -153,7 +152,7 @@ describe('routeIntent', () => {
     await routeIntent(ctx as any, 'Новый проект');
     expect(ctx.session.awaiting_input).toBe('project_name');
     expect(ctx.reply).toHaveBeenCalled();
-    expect(vi.mocked(claude.messages.create)).not.toHaveBeenCalled();
+    expect(vi.mocked(generateWithClaude)).not.toHaveBeenCalled();
   });
 
   it('URL → calls handleUrlMessage', async () => {
@@ -162,49 +161,45 @@ describe('routeIntent', () => {
   });
 
   it('"Покажи проекты" → LIST_PROJECTS intent → calls handleProjects', async () => {
-    vi.mocked(claude.messages.create).mockResolvedValueOnce(
-      makeClaudeResponse({ intent: 'LIST_PROJECTS', entity: '' }) as any
+    vi.mocked(generateWithClaude).mockResolvedValueOnce(
+      mockClaudeJson({ intent: 'LIST_PROJECTS', entity: '' })
     );
     await routeIntent(ctx as any, 'Покажи проекты');
     expect(vi.mocked(handleProjects)).toHaveBeenCalled();
   });
 
   it('"Удали проект Стартап" → DELETE_PROJECT intent → replies', async () => {
-    vi.mocked(claude.messages.create).mockResolvedValueOnce(
-      makeClaudeResponse({ intent: 'DELETE_PROJECT', entity: 'Стартап' }) as any
+    vi.mocked(generateWithClaude).mockResolvedValueOnce(
+      mockClaudeJson({ intent: 'DELETE_PROJECT', entity: 'Стартап' })
     );
     await routeIntent(ctx as any, 'Удали проект Стартап');
     expect(ctx.reply).toHaveBeenCalled();
   });
 
   it('"Хочу сделать бренд для кофейни" → NEW_PROJECT intent → sets awaiting_input', async () => {
-    vi.mocked(claude.messages.create).mockResolvedValueOnce(
-      makeClaudeResponse({ intent: 'NEW_PROJECT', entity: '' }) as any
+    vi.mocked(generateWithClaude).mockResolvedValueOnce(
+      mockClaudeJson({ intent: 'NEW_PROJECT', entity: '' })
     );
     await routeIntent(ctx as any, 'Хочу сделать бренд для кофейни');
     expect(ctx.session.awaiting_input).toBe('project_name');
   });
 
   it('"Как это работает?" → QUESTION intent → replies with answer', async () => {
-    // First call: classifyIntent
-    vi.mocked(claude.messages.create).mockResolvedValueOnce(
-      makeClaudeResponse({ intent: 'QUESTION', entity: 'Как это работает?' }) as any
+    // First call: classifyIntent (classifier tier, returns JSON)
+    vi.mocked(generateWithClaude).mockResolvedValueOnce(
+      mockClaudeJson({ intent: 'QUESTION', entity: 'Как это работает?' })
     );
-    // Second call: handleQuestionIntent answer generation
-    vi.mocked(claude.messages.create).mockResolvedValueOnce({
-      content: [{ type: 'text', text: 'Я помогаю создавать бренды за 30-40 минут.' }],
-      usage: { input_tokens: 10, output_tokens: 20 },
-    } as any);
+    // Second call: handleQuestionIntent answer generation (default tier, plain text)
+    vi.mocked(generateWithClaude).mockResolvedValueOnce(
+      'Я помогаю создавать бренды за 30-40 минут.'
+    );
 
     await routeIntent(ctx as any, 'Как это работает?');
     expect(ctx.reply).toHaveBeenCalled();
   });
 
   it('malformed Claude JSON → falls back gracefully without throwing', async () => {
-    vi.mocked(claude.messages.create).mockResolvedValueOnce({
-      content: [{ type: 'text', text: 'not valid json' }],
-      usage: { input_tokens: 5, output_tokens: 5 },
-    } as any);
+    vi.mocked(generateWithClaude).mockResolvedValueOnce('not valid json');
     await expect(routeIntent(ctx as any, 'Непонятный текст')).resolves.not.toThrow();
   });
 });

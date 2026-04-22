@@ -1,6 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
-import { claude, CLAUDE_MODEL } from "../ai/claude";
+import { generateWithClaude } from "../ai/gateway";
 import { handleStatus, handleExport, handleHelp, handleProjects, handleModule, handleRestart } from "./navigation";
 import { handleProjectNameInput } from "./newProject";
 import { handleUserMessage, handleSummarize } from "../briefing/dialog";
@@ -94,18 +94,26 @@ async function classifyModuleIntent(
     `Для остальных intent поле message_to_user оставь пустым.\n\n` +
     `Контекст студии:\n${styleGuideText}`;
 
-  const response = await claude.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 150,
-    system: systemPrompt,
-    messages: [{ role: "user", content: text }],
-  });
+  let raw: string;
+  try {
+    raw = (
+      await generateWithClaude(systemPrompt, text, {
+        maxTokens: 150,
+        tier: "classifier",
+        softFail: true,
+      })
+    ).trim();
+  } catch {
+    // Should not reach — softFail returns "" — but be defensive.
+    return { intent: "REVISION", message_to_user: "" };
+  }
 
-  const raw = (response.content[0] as { type: string; text: string }).text.trim();
+  if (!raw) return { intent: "REVISION", message_to_user: "" };
+
   try {
     return JSON.parse(raw) as ModuleIntentResult;
   } catch {
-    // Fallback: treat as revision so the user's text is not lost
+    // JSON malformed — treat as revision so the user's text is not lost.
     return { intent: "REVISION", message_to_user: "" };
   }
 }
@@ -194,14 +202,21 @@ async function classifyIntent(ctx: BotContext, text: string): Promise<IntentResu
 
 ВАЖНО: если пользователь находится в процессе работы над модулем (awaiting_input не пустой или current_module установлен) и пишет текст который выглядит как комментарий, фидбэк, пожелание или правка к результату — это CONTINUE_DIALOG, даже если текст длинный или содержит критику. При awaiting_input содержащем "_revision", "_select", "briefing", "naming", "concept", "verbal", "visual" — любой свободный текст по умолчанию CONTINUE_DIALOG.`;
 
-  const response = await claude.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 100,
-    system: systemPrompt,
-    messages: [{ role: "user", content: text }],
-  });
+  let raw: string;
+  try {
+    raw = (
+      await generateWithClaude(systemPrompt, text, {
+        maxTokens: 100,
+        tier: "classifier",
+        softFail: true,
+      })
+    ).trim();
+  } catch {
+    return { intent: "CONTINUE_DIALOG", entity: text };
+  }
 
-  const raw = (response.content[0] as { type: string; text: string }).text.trim();
+  if (!raw) return { intent: "CONTINUE_DIALOG", entity: text };
+
   try {
     return JSON.parse(raw) as IntentResult;
   } catch {
@@ -275,15 +290,20 @@ async function handleQuestionIntent(ctx: BotContext, question: string): Promise<
 
   let answer: string;
   try {
-    const response = await claude.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 200,
-      system: systemPrompt,
-      messages: [{ role: "user", content: question }],
-    });
-    answer = (response.content[0] as { type: string; text: string }).text.trim();
+    answer = (
+      await generateWithClaude(systemPrompt, question, {
+        maxTokens: 200,
+        tier: "default",
+        softFail: true,
+      })
+    ).trim();
+    if (!answer) {
+      answer =
+        "Я помогаю создавать бренды с нуля — от идеи до готового документа. Обычно это 30-40 минут работы.";
+    }
   } catch {
-    answer = "Я помогаю создавать бренды с нуля — от идеи до готового документа. Обычно это 30-40 минут работы.";
+    answer =
+      "Я помогаю создавать бренды с нуля — от идеи до готового документа. Обычно это 30-40 минут работы.";
   }
 
   const kb = projectId

@@ -1,6 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
-import { claude, CLAUDE_MODEL } from "../ai/claude";
+import { generateWithClaude } from "../ai/gateway";
 
 const INTENT_SYSTEM_PROMPT = `Ты помощник бота для брендинговой студии. Пользователь написал сообщение после старта бота. Определи его намерение. Ответь ОДНИМ словом:
 - NEW_PROJECT — хочет создать новый проект или начать работу
@@ -21,13 +21,12 @@ const startKeyboard = new InlineKeyboard()
   .text("📂 Мои проекты", "my_projects");
 
 async function classifyIntent(text: string): Promise<string> {
-  const response = await claude.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 10,
-    system: INTENT_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: text }],
+  const raw = await generateWithClaude(INTENT_SYSTEM_PROMPT, text, {
+    maxTokens: 10,
+    tier: "classifier",
+    softFail: true,
   });
-  return (response.content[0] as { type: string; text: string }).text.trim().toUpperCase();
+  return raw.trim().toUpperCase();
 }
 
 export async function handleSmartFallback(ctx: BotContext): Promise<void> {

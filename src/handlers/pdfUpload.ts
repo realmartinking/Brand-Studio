@@ -7,8 +7,10 @@ import sharp from "sharp";
 import pdfParse from "pdf-parse";
 import { InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
-import { generateWithClaude } from "../ai/gateway";
-import { claude, CLAUDE_MODEL } from "../ai/claude";
+import { generateVisionWithClaude, generateWithClaude } from "../ai/gateway";
+import { logger } from "../config/logger";
+
+const log = logger.child({ mod: "pdfUpload" });
 import { getActiveBrief, appendUploadedDocument, appendDialogMessage, completeBrief, getUploadedDocumentsContext, saveStructuredBrief } from "../db/briefs";
 import { sendLongMessage } from "../utils/telegram";
 
@@ -92,25 +94,14 @@ async function extractTextFromScannedPdf(
       const compressed = await compressImage(path.join(tmpDir, file));
       const base64 = compressed.toString("base64");
 
-      const res = await claude.messages.create({
-        model: CLAUDE_MODEL,
-        max_tokens: 4000,
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image" as const,
-              source: { type: "base64" as const, media_type: "image/jpeg" as const, data: base64 },
-            },
-            {
-              type: "text" as const,
-              text: "Извлеки весь текст с этого изображения. Если есть визуальные элементы (логотипы, схемы, мудборды) — опиши их.",
-            },
-          ],
-        }],
-      });
+      const pageText = await generateVisionWithClaude(
+        "Извлекай содержимое изображений точно и структурированно.",
+        "Извлеки весь текст с этого изображения. Если есть визуальные элементы (логотипы, схемы, мудборды) — опиши их.",
+        [{ mediaType: "image/jpeg", base64 }],
+        { maxTokens: 4000, tier: "default", softFail: true }
+      );
 
-      pageTexts.push((res.content[0] as { type: string; text: string }).text);
+      pageTexts.push(pageText);
     }
 
     return pageTexts.join("\n\n---\n\n");
@@ -423,8 +414,8 @@ export async function handlePhotoMessage(ctx: BotContext): Promise<void> {
   }
 
   let description: string;
+  let compressed = imageBuffer;
   try {
-    let compressed = imageBuffer;
     if (imageBuffer.length > 4 * 1024 * 1024) {
       let quality = 80;
       compressed = await sharp(imageBuffer).jpeg({ quality }).toBuffer();
@@ -439,27 +430,22 @@ export async function handlePhotoMessage(ctx: BotContext): Promise<void> {
           .toBuffer();
       }
     }
-    const base64 = compressed.toString("base64");
-    const res = await claude.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 1000,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "image" as const,
-            source: { type: "base64" as const, media_type: "image/jpeg" as const, data: base64 },
-          },
-          {
-            type: "text" as const,
-            text: "Опиши это изображение. Если есть текст — извлеки его. Если это мудборд, логотип или дизайн — опиши стиль, цвета, композицию.",
-          },
-        ],
-      }],
-    });
-    description = (res.content[0] as { type: string; text: string }).text;
   } catch (err) {
-    console.error("[vision] Claude API error:", err);
+    log.error({ err: (err as Error).message }, "image compression failed");
+    await ctx.reply("❌ Не удалось обработать изображение.");
+    return;
+  }
+
+  const base64 = compressed.toString("base64");
+  try {
+    description = await generateVisionWithClaude(
+      "Ты анализируешь пользовательские изображения в контексте брендингового проекта.",
+      "Опиши это изображение. Если есть текст — извлеки его. Если это мудборд, логотип или дизайн — опиши стиль, цвета, композицию.",
+      [{ mediaType: "image/jpeg", base64 }],
+      { maxTokens: 1000, tier: "default" }
+    );
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "vision analysis failed");
     await ctx.reply("❌ Не удалось обработать изображение.");
     return;
   }
